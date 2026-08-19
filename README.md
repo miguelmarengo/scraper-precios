@@ -352,7 +352,62 @@ Google: esa parte funciona igual sin ningún ajuste.
 
 ---
 
-## 12. Notas legales
+## 12. Correrla en privado con Docker
+
+Si prefieres no depender de la URL pública de Streamlit Community Cloud —por ejemplo porque
+es una herramienta de uso interno y no quieres que quede accesible a cualquiera con el
+enlace— puedes correrla en tu propia máquina o servidor con Docker. Así nunca toca internet
+salvo que tú decidas exponerla.
+
+### Construir y correr
+
+```bash
+docker compose up --build
+```
+
+Se abre en `http://localhost:8501`. Para pararla: `Ctrl+C`, y `docker compose down` si quieres
+liberar el contenedor por completo.
+
+Si no usas `docker compose`, con Docker a secas:
+
+```bash
+docker build -t scraper-precios .
+docker run -p 8501:8501 --env APP_PASSWORD=tu-clave scraper-precios
+```
+
+### Protegerla con contraseña
+
+Sin nada configurado, cualquiera que llegue a la URL puede usarla. Para que pida una
+contraseña antes de mostrar cualquier cosa, define la variable `APP_PASSWORD`:
+
+```bash
+APP_PASSWORD=tu-clave docker compose up --build
+```
+
+o edita el `docker-compose.yml` y pon la clave directamente en la línea de `environment`.
+Esta misma variable funciona igual si corres la app con `bash abrir.sh` en tu computadora
+(`export APP_PASSWORD=tu-clave` antes de abrirla). En Streamlit Community Cloud, el
+equivalente es agregar `APP_PASSWORD = "tu-clave"` en **Settings → Secrets**.
+
+### Conectar Google Sheets dentro del contenedor
+
+El archivo `docker-compose.yml` ya trae preparada la línea que monta tu `credenciales.json`
+en la ruta que la app espera. Descomenta/ajusta esa línea de `volumes` y coloca el archivo
+junto al `docker-compose.yml` con ese nombre. Si solo vas a extraer y descargar en CSV/Excel,
+puedes saltarte esto por completo.
+
+### Si quieres acceder desde fuera de tu red
+
+Docker por sí solo no la hace "privada" en internet — solo evita que quede en la URL pública
+de Streamlit Cloud. Si necesitas que alguien más la use desde otro lugar, sin abrir puertos
+en tu router, algo como [Tailscale](https://tailscale.com) o un
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+te da una liga privada solo para los dispositivos que tú autorices. Con la contraseña de la
+sección anterior de todos modos queda protegida aunque alguien más llegue a la liga.
+
+---
+
+## 13. Notas legales
 
 Extraer datos públicos de precios es una práctica común, pero conviene tener en cuenta que:
 

@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+
+# Nunca deben entrar a la imagen
+credenciales.json
+*.credenciales.json
+credentials.json
+.streamlit/secrets.toml
+
+# No hacen falta para correr la app
+tests/
+probar.sh
+*.csv
+*.xlsx
+.DS_Store

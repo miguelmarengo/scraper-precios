@@ -1,0 +1,15 @@
+services:
+  scraper-precios:
+    build: .
+    container_name: scraper-precios
+    ports:
+      - "8501:8501"
+    environment:
+      # Contraseña de acceso. Sin ella, la app queda abierta a quien tenga la URL.
+      - APP_PASSWORD=${APP_PASSWORD:-}
+    volumes:
+      # Opcional: monta aquí tu credenciales.json para escribir en Google Sheets.
+      # Si no la usas, comenta esta línea — la app funciona igual para extraer y
+      # descargar en CSV/Excel.
+      - ./credenciales.json:/home/appuser/.config/scraper-precios/credenciales.json:ro
+    restart: unless-stopped

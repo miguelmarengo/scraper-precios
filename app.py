@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import time
 from datetime import datetime
 from urllib.parse import urlparse
@@ -15,7 +16,47 @@ import textos
 from scraper import COLUMNS, a_tabla, scrapear
 from sincronizar import CAMBIO, COL_ESTADO, FALTANTE, IGUAL, NUEVO, construir_plan
 
-st.set_page_config(page_title="Precios → Google Sheets", page_icon="🛒", layout="wide")
+NOMBRE_APP = "Scraper de Precios · Micaela"
+SUBTITULO_APP = "Herramienta interna — uso exclusivo de Micaela"
+
+st.set_page_config(page_title=NOMBRE_APP, page_icon="🛒", layout="wide")
+
+
+def _clave_de_acceso() -> str:
+    """La contraseña puede venir de una variable de entorno (Docker) o de
+    st.secrets (Streamlit Community Cloud). Si no se configura ninguna,
+    la app queda abierta — pensado para uso local de confianza."""
+    try:
+        clave = st.secrets.get("APP_PASSWORD", "")
+    except Exception:
+        clave = ""
+    return clave or os.environ.get("APP_PASSWORD", "")
+
+
+def _exigir_acceso() -> None:
+    clave = _clave_de_acceso()
+    if not clave or st.session_state.get("autenticado"):
+        return
+
+    st.title(f"🔒 {NOMBRE_APP}")
+    st.caption(SUBTITULO_APP)
+    st.write("Esta herramienta es privada. Pide la contraseña a quien te la comparta.")
+
+    with st.form("form_acceso"):
+        intento = st.text_input("Contraseña", type="password", label_visibility="collapsed",
+                                 placeholder="Contraseña")
+        entrar = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+
+    if entrar:
+        if intento == clave:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    st.stop()
+
+
+_exigir_acceso()
 
 MODOS = ["sincronizar", "reemplazar", "nueva", "agregar"]
 NOMBRES_MODO = {
@@ -118,7 +159,8 @@ with st.sidebar:
     )
 
 # ═══════════════════════════════════════════════════ encabezado
-st.title("🛒 Precios de una tienda → tu Google Sheet")
+st.title(f"🛒 {NOMBRE_APP}")
+st.caption(SUBTITULO_APP)
 st.caption(
     "🟢 Conectado a Google — puedo escribir directo en tu hoja."
     if conectado else
