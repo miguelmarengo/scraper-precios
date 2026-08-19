@@ -294,65 +294,75 @@ Por separado, siempre visibles bajo "🛡️ Seguridad":
 
 ---
 
-## 10. Pruebas
+## 10. Agente de Micaela (opcional): pídele una opinión con IA
+
+Además de filtrar por palabras exactas, en la pestaña **5️⃣ Resultados** hay una caja que dice
+*"Pregúntale al agente de Micaela"*. Ahí puedes escribir un gusto, una persona o un criterio en
+lenguaje natural — por ejemplo:
+
+- *"Los que elegiría un arquitecto minimalista, con concreto y líneas limpias"*
+- *"Los que usaría un electricista que prioriza eficiencia y garantía"*
+- *"Los que se ven más frescos y de mejor calidad"*
+
+El agente le pone un puntaje del 0 al 100 y una razón corta, en español, a cada producto que
+ya extrajiste — sin volver a tocar la tienda.
+
+**Cómo activarlo:** en la barra lateral, sección "🤖 Agente de Micaela", pega una llave de API
+de [OpenAI](https://platform.openai.com/api-keys) (empieza con `sk-`). Es tuya, el costo de cada
+consulta corre por tu cuenta (usa un modelo económico por defecto), y solo vive en esa sesión del
+navegador — no se guarda en ningún archivo. Si prefieres dejarla fija, define la variable de
+entorno `OPENAI_API_KEY` (o `openai_api_key` en `st.secrets`) antes de abrir la app, igual que
+`APP_PASSWORD`. Sin ninguna llave configurada, el resto de la app funciona exactamente igual;
+solo esta caja queda apagada.
+
+**Sus límites, para no llevarte una sorpresa:** el agente no ve fotos ni prueba productos —
+razona únicamente sobre el texto que el scraper ya extrajo (nombre, descripción, material,
+características, precio). No sabe con certeza qué pensaría una persona real, ni puede confirmar
+qué tan fresca está una fruta con solo leer su ficha; cuando el texto no le alcanza para decidir,
+se le pide que lo diga en la razón en vez de inventar. Es una opinión generada por IA, no una
+garantía — revisa tú antes de comprar, sobre todo en productos perecederos.
+
+Por defecto usa `gpt-4o-mini` contra la API de OpenAI, pero puedes apuntarlo a cualquier servicio
+compatible (Groq, Together, un modelo local con Ollama, etc.) con las variables de entorno
+`AGENTE_MODELO` y `AGENTE_BASE_URL`.
+
+---
+
+## 11. Pruebas
 
 ```bash
 bash probar.sh
 ```
 
-Levanta tiendas Shopify, WooCommerce y genérica simuladas en tu propia máquina y corre 197
-verificaciones: conversión de unidades, formatos de precio mexicanos y europeos, plurales y
-género en el filtro, variantes, descuentos, fotos, inventario, y toda la lógica de
-sincronización (emparejamiento, altas, cambios, desaparecidos, columnas propias, respaldo y
-colores). No toca internet ni Google: la conversación con Google Sheets se verifica contra un
-doble que registra cada llamada.
+Levanta tiendas Shopify, WooCommerce y genérica simuladas en tu propia máquina y corre las
+verificaciones de conversión de unidades, formatos de precio mexicanos y europeos, plurales y
+género en el filtro, variantes, descuentos, fotos, inventario, toda la lógica de sincronización
+(emparejamiento, altas, cambios, desaparecidos, columnas propias, respaldo y colores), y el
+agente de IA (con un doble que simula sus respuestas). No toca internet ni Google ni OpenAI: todo
+se verifica contra dobles que registran cada llamada.
 
 ---
 
-## 11. Publicarla en internet (Streamlit Community Cloud)
+## 12. Publicarla en internet
 
-La app es una interfaz de Streamlit: necesita un servidor Python corriendo, así que **no
-funciona en plataformas pensadas solo para páginas estáticas o funciones sin estado (por
-ejemplo Vercel)**. La forma gratuita y sin complicaciones de darle una URL pública es
-[Streamlit Community Cloud](https://share.streamlit.io), hecho justo para este tipo de apps:
+**Esta app ya no se publica en Streamlit Community Cloud.** Ahora corre en privado con Docker
+(sección 13) — es la forma recomendada, y la que se usa hoy.
 
-1. Sube el proyecto a un repositorio de GitHub (si ya lo hiciste, sigue en el paso 2).
-2. Entra a <https://share.streamlit.io> e inicia sesión con tu cuenta de GitHub.
-3. **Create app** → elige tu repositorio, la rama `main` y el archivo principal `app.py`.
-4. Dale **Deploy**. En un par de minutos tienes una URL como
-   `https://tu-app.streamlit.app` que puedes compartir con quien quieras.
-
-**Sobre las credenciales de Google:** ahí no existe una carpeta personal como
-`~/.config/scraper-precios/`, así que el archivo `credenciales.json` no aplica. En su lugar:
-
-1. En el panel de tu app dentro de Streamlit Cloud, abre **Settings → Secrets**.
-2. Pega el contenido de tu archivo `credenciales.json` con este formato (con corchetes y
-   comillas triples, tal cual):
-
-   ```toml
-   [gcp_service_account]
-   type = "service_account"
-   project_id = "..."
-   private_key_id = "..."
-   private_key = """-----BEGIN PRIVATE KEY-----
-   ...
-   -----END PRIVATE KEY-----
-   """
-   client_email = "algo@tu-proyecto.iam.gserviceaccount.com"
-   client_id = "..."
-   token_uri = "https://oauth2.googleapis.com/token"
-   ```
-
-3. Guarda. La app detecta automáticamente estos "Secrets" y los usa en vez de buscar un
-   archivo — no necesitas cambiar nada más. El resto (compartir la hoja con el correo del
-   robot, paso 8 de la sección 3) sigue igual.
-
-Si solo quieres extraer datos y descargar el CSV/Excel, ni siquiera necesitas configurar
-Google: esa parte funciona igual sin ningún ajuste.
+> **Sobre Vercel:** esta app es una interfaz de Streamlit, es decir, necesita un servidor
+> Python corriendo todo el tiempo (con WebSocket para que los controles respondan). Vercel está
+> pensado para páginas estáticas y funciones "sin estado" que responden una petición y terminan
+> — no para procesos largos como este, y **no ejecuta contenedores Docker** como el de este
+> proyecto. Por eso `docker compose up` (sección 12) no se puede simplemente "subir a Vercel":
+> ahí no correría. Si en algún momento quieres una URL pública (no solo local o en tu red),
+> lo que sí funciona con este mismo `Dockerfile` sin cambiarle nada es un servicio que sí
+> corre contenedores: [Render](https://render.com), [Railway](https://railway.app),
+> [Fly.io](https://fly.io) o Google Cloud Run. Todos tienen plan gratuito o muy barato para
+> uso personal. Si prefieres quedarte 100% privada, Tailscale o un Cloudflare Tunnel
+> (sección 13) evitan tener que subirla a ningún lado.
 
 ---
 
-## 12. Correrla en privado con Docker
+## 13. Correrla en privado con Docker
 
 Si prefieres no depender de la URL pública de Streamlit Community Cloud —por ejemplo porque
 es una herramienta de uso interno y no quieres que quede accesible a cualquiera con el
@@ -389,6 +399,15 @@ Esta misma variable funciona igual si corres la app con `bash abrir.sh` en tu co
 (`export APP_PASSWORD=tu-clave` antes de abrirla). En Streamlit Community Cloud, el
 equivalente es agregar `APP_PASSWORD = "tu-clave"` en **Settings → Secrets**.
 
+### Dejar fija la llave del agente de IA (opcional)
+
+Si no quieres pegar la llave de OpenAI cada vez que abres la app (ver sección 10), defínela
+igual que `APP_PASSWORD`:
+
+```bash
+APP_PASSWORD=tu-clave OPENAI_API_KEY=sk-tu-llave docker compose up --build
+```
+
 ### Conectar Google Sheets dentro del contenedor
 
 El archivo `docker-compose.yml` ya trae preparada la línea que monta tu `credenciales.json`
@@ -407,7 +426,7 @@ sección anterior de todos modos queda protegida aunque alguien más llegue a la
 
 ---
 
-## 13. Notas legales
+## 14. Notas legales
 
 Extraer datos públicos de precios es una práctica común, pero conviene tener en cuenta que:
 

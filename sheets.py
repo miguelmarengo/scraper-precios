@@ -111,19 +111,56 @@ def _abrir_libro(gc, destino: str, compartir_con: str = ""):
         return libro, True
 
 
+def listar_hojas(ruta_creds: str | None = None) -> list[dict]:
+    """Todas las hojas de cálculo que este robot ha creado o a las que tiene
+    acceso — el "historial" de la app. No hace falta guardar nada aparte:
+    Google Drive ya sabe qué hojas existen, así que esto siempre está al día
+    aunque cambies de computadora o se reinicie el servidor."""
+    gc = _cliente(ruta_creds)
+    try:
+        archivos = gc.list_spreadsheet_files()
+    except Exception as e:
+        raise ErrorSheets(f"No pude leer tu Google Drive: {e}") from e
+
+    archivos = sorted(archivos, key=lambda a: a.get("modifiedTime", ""), reverse=True)
+    return [
+        {
+            "id": a["id"],
+            "nombre": a.get("name") or "(sin nombre)",
+            "url": f"https://docs.google.com/spreadsheets/d/{a['id']}",
+            "modificado": a.get("modifiedTime", ""),
+        }
+        for a in archivos
+        if a.get("id")
+    ]
+
+
 def leer_hoja(destino: str, pestana: str, ruta_creds: str | None = None) -> dict:
     """Lee la pestaña tal cual está, conservando las fórmulas (=IMAGE) intactas.
 
     Devuelve {'libro','hoja','encabezado','filas','existe'}.
     """
-    import gspread
-
-    gc = _cliente(ruta_creds)
     if not (destino or "").strip():
         raise ErrorSheets(
             "Para sincronizar necesito la URL de tu hoja. Pégala en «Tu hoja de Google»."
         )
-    libro, _ = _abrir_libro(gc, destino)
+    return _leer_o_crear(destino, pestana, "", ruta_creds)
+
+
+def leer_o_crear_hoja(
+    destino: str, pestana: str, *, compartir_con: str = "", ruta_creds: str | None = None
+) -> dict:
+    """Como `leer_hoja`, pero si `destino` viene vacío crea una hoja nueva en
+    vez de exigir la URL — pensado para el modo «comparar», donde la primera
+    vez todavía no existe ningún tablero."""
+    return _leer_o_crear(destino, pestana, compartir_con, ruta_creds)
+
+
+def _leer_o_crear(destino: str, pestana: str, compartir_con: str, ruta_creds: str | None) -> dict:
+    import gspread
+
+    gc = _cliente(ruta_creds)
+    libro, _ = _abrir_libro(gc, destino, compartir_con)
 
     try:
         hoja = libro.worksheet(pestana)
@@ -195,6 +232,77 @@ def aplicar_plan(contexto: dict, plan, *, respaldar: bool = True, pestana: str =
     return {"url": libro.url, "titulo": libro.title, "pestana": hoja.title, **plan.resumen}
 
 
+def aplicar_comparacion(
+    contexto: dict, tabla: list[list], *, nuevos: int = 0, respaldar: bool = True,
+    pestana: str = "Comparación",
+) -> dict:
+    """Escribe el tablero de comparación y resalta en verde los renglones
+    que son producto nuevo en esta corrida (siempre van al final)."""
+    import gspread
+
+    libro = contexto["libro"]
+    hoja = contexto["hoja"]
+
+    if hoja is None:
+        hoja = libro.add_worksheet(title=pestana, rows=len(tabla) + 20, cols=len(tabla[0]) + 5)
+
+    if respaldar and contexto.get("filas"):
+        titulo = "Respaldo (antes de comparar)"
+        try:
+            try:
+                respaldo = libro.worksheet(titulo)
+                respaldo.clear()
+            except gspread.WorksheetNotFound:
+                respaldo = libro.add_worksheet(
+                    title=titulo, rows=len(contexto["filas"]) + 20, cols=max(len(contexto["encabezado"]), 5)
+                )
+            previo = [contexto["encabezado"]] + contexto["filas"]
+            respaldo.update(values=previo, range_name="A1", value_input_option="USER_ENTERED")
+        except Exception:
+            pass
+
+    filas_necesarias = len(tabla) + 10
+    columnas = len(tabla[0]) if tabla else 0
+
+    hoja.clear()
+    if hoja.row_count < filas_necesarias:
+        hoja.add_rows(filas_necesarias - hoja.row_count)
+    if hoja.col_count < columnas:
+        hoja.add_cols(columnas - hoja.col_count)
+
+    hoja.update(values=tabla, range_name="A1", value_input_option="USER_ENTERED")
+    hoja.freeze(rows=1)
+    try:
+        hoja.format("A1:BZ1", {"textFormat": {"bold": True}})
+    except Exception:
+        pass
+
+    if nuevos:
+        total_filas = len(tabla) - 1
+        inicio = total_filas - nuevos
+        try:
+            libro.batch_update({"requests": [{
+                "repeatCell": {
+                    "range": {
+                        "sheetId": hoja.id,
+                        "startRowIndex": inicio + 1,
+                        "endRowIndex": total_filas + 1,
+                    },
+                    "cell": {"userEnteredFormat": {"backgroundColor": {"red": 0.85, "green": 0.94, "blue": 0.85}}},
+                    "fields": "userEnteredFormat.backgroundColor",
+                }
+            }]})
+        except Exception:
+            pass
+
+    encabezado_final = tabla[0] if tabla else []
+    _ajustar_para_fotos(libro, hoja, encabezado_final, len(tabla))
+    _marcar_decision(libro, hoja, encabezado_final)
+    _resaltar_mejor_precio(libro, hoja, encabezado_final, len(tabla))
+
+    return {"url": libro.url, "titulo": libro.title, "pestana": hoja.title}
+
+
 def _ajustar_para_fotos(libro, hoja, encabezado: list, filas: int) -> None:
     """Ensancha la columna de fotos y sube el alto de las filas para que
     las miniaturas de =IMAGE() se vean completas."""
@@ -219,6 +327,67 @@ def _ajustar_para_fotos(libro, hoja, encabezado: list, filas: int) -> None:
     ]
     try:
         libro.batch_update({"requests": peticiones})
+    except Exception:
+        pass
+
+
+def _marcar_decision(libro, hoja, encabezado: list) -> None:
+    """Convierte la columna `decisión` (viendo / favorito / comprado) en un
+    menú desplegable, para que decidir sea un clic y no escribir a mano."""
+    from comparar import COL_DECISION, OPCIONES_DECISION
+
+    if COL_DECISION not in encabezado:
+        return
+    col = encabezado.index(COL_DECISION)
+    try:
+        libro.batch_update({"requests": [{
+            "setDataValidation": {
+                "range": {
+                    "sheetId": hoja.id,
+                    "startRowIndex": 1,
+                    "startColumnIndex": col,
+                    "endColumnIndex": col + 1,
+                },
+                "rule": {
+                    "condition": {
+                        "type": "ONE_OF_LIST",
+                        "values": [{"userEnteredValue": v} for v in OPCIONES_DECISION],
+                    },
+                    "showCustomUi": True,
+                    "strict": False,
+                },
+            }
+        }]})
+    except Exception:
+        pass
+
+
+def _resaltar_mejor_precio(libro, hoja, encabezado: list, filas: int) -> None:
+    """Pinta de dorado suave la columna `🏆 mejor precio`, para que la mejor
+    oferta de cada renglón salte a la vista sin tener que leer columna por
+    columna."""
+    from comparar import COL_MEJOR
+
+    if COL_MEJOR not in encabezado:
+        return
+    col = encabezado.index(COL_MEJOR)
+    try:
+        libro.batch_update({"requests": [{
+            "repeatCell": {
+                "range": {
+                    "sheetId": hoja.id,
+                    "startRowIndex": 1,
+                    "endRowIndex": max(filas, 2),
+                    "startColumnIndex": col,
+                    "endColumnIndex": col + 1,
+                },
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.78},
+                    "textFormat": {"bold": True},
+                }},
+                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold",
+            }
+        }]})
     except Exception:
         pass
 

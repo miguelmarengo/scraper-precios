@@ -140,6 +140,12 @@ class ClienteFalso:
     def create(self, titulo):
         return libro
 
+    def list_spreadsheet_files(self, title=None, folder_id=None):
+        return [
+            {"id": "AAA", "name": "Precios Palacio de Hierro", "modifiedTime": "2026-08-01T10:00:00Z"},
+            {"id": "BBB", "name": "Comparación muebles", "modifiedTime": "2026-08-10T10:00:00Z"},
+        ]
+
 
 sheets._cliente = lambda ruta=None: ClienteFalso()
 
@@ -283,6 +289,76 @@ res8 = sheets.escribir(tabla_simple, destino="", pestana="Productos", modo="reem
 check(res8["creado"] is True, "se marca como recién creada")
 check("Sheet1" not in libro8._hojas, "se borra el 'Sheet1' que Google regala", list(libro8._hojas))
 check("Productos" in libro8._hojas, "y queda la pestaña con nuestros datos")
+
+print("\n[8] Historial de hojas (Google Drive)")
+sheets._cliente = lambda ruta=None: ClienteFalso()
+historial = sheets.listar_hojas()
+check(len(historial) == 2, "se listan las dos hojas", str(historial))
+check(historial[0]["nombre"] == "Comparación muebles", "la más reciente sale primero", str(historial))
+check(historial[0]["url"] == "https://docs.google.com/spreadsheets/d/BBB", "se arma la liga completa",
+      historial[0]["url"])
+
+print("\n[9] Comparación entre tiendas — tablero nuevo")
+hoja9 = WorksheetFalsa("Sheet1", [])
+libro9 = SpreadsheetFalso([hoja9])
+sheets._cliente = lambda ruta=None: type("C", (), {"create": lambda self, t: libro9})()
+ctx9 = sheets.leer_o_crear_hoja("", "Comparación", compartir_con="")
+check(ctx9["existe"] is False, "todavía no hay pestaña «Comparación»", str(ctx9))
+check(ctx9["libro"] is libro9, "abre el libro recién creado")
+
+tabla9 = [
+    ["foto", "producto", "variante", "categoria", "precio · Palacio de Hierro"],
+    ["", "Sillón Oslo", "Blanco", "Sala", "12999.00"],
+    ["", "Lámpara", "", "Sala", "899.00"],
+]
+res9 = sheets.aplicar_comparacion(ctx9, tabla9, nuevos=2, respaldar=True, pestana="Comparación")
+check("Comparación" in libro9._hojas, "se crea la pestaña de comparación")
+hoja_creada = libro9._hojas["Comparación"]
+check(hoja_creada._valores[0] == tabla9[0], "se escribió el encabezado", str(hoja_creada._valores[0]))
+check("Respaldo (antes de comparar)" not in libro9._hojas, "sin datos previos no se hace respaldo")
+peticiones9 = [p for lote in libro9.lotes for p in lote.get("requests", [])]
+verdes = [p for p in peticiones9 if "repeatCell" in p]
+check(len(verdes) == 1, "se resaltan en verde los renglones nuevos", str(len(verdes)))
+rango9 = verdes[0]["repeatCell"]["range"]
+check(rango9["startRowIndex"] == 1 and rango9["endRowIndex"] == 3, "el rango cubre ambos renglones nuevos",
+      str(rango9))
+check(res9["pestana"] == "Comparación", "se reporta la pestaña usada")
+
+print("\n[10] Comparación — con respaldo cuando ya había contenido")
+hoja10 = WorksheetFalsa("Comparación", [["producto"], ["Silla"]])
+libro10 = SpreadsheetFalso([hoja10])
+sheets._cliente = lambda ruta=None: type("C", (), {"open_by_key": lambda self, k: libro10})()
+ctx10 = sheets.leer_o_crear_hoja("https://docs.google.com/spreadsheets/d/ZZZ", "Comparación")
+check(ctx10["existe"] is True, "encuentra la pestaña existente")
+sheets.aplicar_comparacion(ctx10, tabla9, nuevos=0, respaldar=True, pestana="Comparación")
+check("Respaldo (antes de comparar)" in libro10._hojas, "esta vez sí se respalda lo que ya había")
+
+print("\n[11] Comparación — miniatura, mejor precio y decisión (viendo/favorito/comprado)")
+hoja11 = WorksheetFalsa("Sheet1", [])
+libro11 = SpreadsheetFalso([hoja11])
+sheets._cliente = lambda ruta=None: type("C", (), {"create": lambda self, t: libro11})()
+ctx11 = sheets.leer_o_crear_hoja("", "Comparación", compartir_con="")
+tabla11 = [
+    ["foto", "producto", "variante", "categoria", "decisión", "🏆 mejor precio",
+     "precio · Palacio de Hierro", "disponible · Palacio de Hierro",
+     "liga · Palacio de Hierro", "actualizado · Palacio de Hierro"],
+    ['=IMAGE("https://cdn/sillon.jpg")', "Sillón Oslo", "Blanco", "Sala", "", "$12,999.00 · Palacio de Hierro",
+     "12999.00", "Sí", "https://palaciodehierro.com/sillon-oslo", "2026-08-19 12:00"],
+]
+sheets.aplicar_comparacion(ctx11, tabla11, nuevos=1, respaldar=False, pestana="Comparación")
+peticiones11 = [p for lote in libro11.lotes for p in lote.get("requests", [])]
+validaciones = [p for p in peticiones11 if "setDataValidation" in p]
+check(len(validaciones) == 1, "se agrega el menú desplegable de la columna decisión", str(len(validaciones)))
+check(validaciones[0]["setDataValidation"]["range"]["startColumnIndex"] == 4,
+      "apunta a la columna correcta", str(validaciones[0]))
+opciones = [v["userEnteredValue"] for v in validaciones[0]["setDataValidation"]["rule"]["condition"]["values"]]
+check(opciones == ["👀 viendo", "⭐ favorito", "🛒 comprado"], "con las tres opciones de siempre", str(opciones))
+doradas = [p for p in peticiones11 if "repeatCell" in p
+           and p["repeatCell"]["cell"]["userEnteredFormat"].get("backgroundColor", {}).get("green") == 0.95]
+check(len(doradas) == 1, "se resalta en dorado la columna de mejor precio", str(len(doradas)))
+check(doradas[0]["repeatCell"]["range"]["startColumnIndex"] == 5, "en la columna correcta", str(doradas[0]))
+hoja11_creada = libro11._hojas["Comparación"]
+check(hoja11_creada._valores[0].index("foto") == 0, "la miniatura sigue siendo la primera columna, bien visible")
 
 print("\n" + "=" * 60)
 if fallos:

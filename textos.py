@@ -73,7 +73,62 @@ lo que hubiera escrito ahí.
 **Cuándo usarlo:** para armar un historial largo de precios, una corrida debajo de la otra,
 y luego graficarlo.
 """,
+    "comparar": """
+**Qué hace:** en vez de un renglón por corrida, arma **un renglón por producto** y le va
+agregando una **columna de precio por cada tienda** que revisas — con foto, liga directa y
+el mejor precio ya calculado.
+
+- Primera corrida (ej. *sillones blancos* en Palacio de Hierro) → crea el tablero.
+- Segunda corrida (ej. los mismos sillones en Liverpool) → **agrega la columna** `precio · Liverpool`
+  en el mismo renglón del producto, para poder comparar de un vistazo.
+- Un producto que solo existe en una tienda → esa columna se queda vacía para las demás, sin
+  problema.
+- La columna **🏆 mejor precio** te dice, sin que tengas que leer columna por columna, cuál
+  tienda tiene el precio más bajo *ahora mismo* para ese producto.
+- La columna **decisión** trae un menú (👀 viendo · ⭐ favorito · 🛒 comprado) para que le des
+  seguimiento a cada cosa que vas a comprar para tu casa.
+
+**Cómo empareja "el mismo producto" entre tiendas distintas:** por nombre (y variante), no por
+SKU ni por liga —cada tienda usa los suyos. Si el nombre es idéntico, se empareja solo. Si se
+parece pero no es idéntico, te lo enseño para que confirmes antes de guardar nada.
+
+**Cuándo usarlo:** para amueblar o remodelar comparando lo mismo entre varios lugares — lámparas,
+sillones, mesas, focos, piso — en Palacio de Hierro, Liverpool, West Elm, Home Depot, etc. También
+sirve para lo de todos los días: el mismo foco o la misma verdura en Walmart, Comercial Mexicana...
+""",
 }
+
+AYUDA_COMPARAR = """
+No hay SKU compartido entre tiendas, así que el emparejamiento se hace por el **nombre del
+producto** (y su variante), normalizado igual que el buscador de la app: sin acentos, sin
+mayúsculas, tolerando plural y género.
+
+| Qué encuentra | Qué pasa |
+|---|---|
+| ✅ Nombre idéntico a uno que ya estaba | Se empareja solo — se agrega la columna de precio de esta tienda a ese renglón |
+| 🤔 Nombre parecido, no idéntico | Te lo enseño para que **tú** confirmes si es el mismo producto |
+| 🆕 No se parece a nada de lo que había | Se agrega como renglón nuevo |
+
+Si dos productos son en realidad el mismo pero con nombres muy distintos entre tiendas (por
+ejemplo "Sillón Oslo" vs "Sofá individual nórdico"), no se van a emparejar solos — quedan como
+renglones separados y los puedes unir a mano en la hoja si quieres.
+
+**Columnas que trae el tablero, sin que hagas nada:**
+
+| Columna | Para qué sirve |
+|---|---|
+| `foto` | La miniatura del producto — nunca solo la liga, para que sepas qué estás viendo de un vistazo |
+| `producto` · `variante` · `categoria` | Con qué se emparejó y en qué grupo cae (lámparas, sillones, mesas…) |
+| `decisión` | Menú de 👀 viendo · ⭐ favorito · 🛒 comprado, para llevar el pendiente de tu proyecto |
+| `🏆 mejor precio` | Se recalcula sola: la tienda más barata *ahora* para ese producto, resaltada en dorado en tu hoja |
+| `precio` · `disponible` · `liga` · `actualizado` **por cada tienda** | El detalle completo, con liga directa para comprar |
+
+**Ideas para cuando estás amueblando algo grande** (una casa, una remodelación): corre el
+mismo tablero de comparación por categoría — un filtro de *lámparas de piso*, otro de
+*sillones*, otro de *focos 20w* — así cada categoría queda en su propio grupo de renglones
+dentro del mismo tablero, y la columna `categoria` te deja filtrar la hoja por cuarto o por tipo
+de mueble sin perder la comparación de precios entre tiendas.
+"""
 
 LEYENDA = """
 | Punto | Qué significa | Qué le pasa al renglón |
@@ -156,4 +211,27 @@ Los pasos completos están en el **README**, sección *Google*. En resumen:
 4. Copias el correo del robot (aparecerá aquí) y compartes tu hoja con él **como Editor**.
 
 Sin el paso 4 vas a ver un error de permisos: el robot existe pero tu hoja no lo conoce.
+"""
+
+AYUDA_AGENTE = """
+El **agente de Micaela** es un asistente de IA opcional. Le describes un gusto, una persona o
+un criterio — *"los que elegiría un arquitecto minimalista"*, *"los que usaría un electricista
+experto"*, *"los que se ven más frescos"* — y en la pestaña **5️⃣ Resultados** te pone un
+puntaje del 0 al 100 y una razón corta a cada producto que ya extrajiste.
+
+**Qué puede hacer bien:** razonar con el texto que el scraper ya sacó — nombre, descripción,
+material, características, precio — y compararlo contra el criterio que le diste, como lo
+haría alguien con buen ojo y mucho tiempo libre.
+
+**Qué no puede hacer:** no ve las fotos ni prueba productos. No sabe con certeza qué tan
+madura está una fruta, qué pensaría exactamente una persona real, ni si un producto es bueno
+en la vida real — solo puede leer lo que la tienda escribió. Cuando el texto no le alcanza para
+decidir, se le pide que lo diga en la razón en vez de inventar. Es una opinión, no una garantía:
+revisa tú antes de comprar.
+
+**Qué necesita:** una llave de API de OpenAI (o de otro proveedor compatible, cambiando la
+variable `AGENTE_BASE_URL`). Es tuya y el costo de cada consulta corre por tu cuenta — no la
+pone esta app. Los textos de los productos que evalúes se envían al servidor de ese proveedor,
+así que solo úsalo si te parece bien compartir esa información. Si no pones ninguna llave, el
+resto de la app funciona igual; solo esta sección queda apagada.
 """

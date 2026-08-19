@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 import pandas as pd
 import streamlit as st
 
+import agente
+import comparar
 import sheets
 import textos
 from scraper import COLUMNS, a_tabla, scrapear
@@ -91,9 +93,10 @@ def _exigir_acceso() -> None:
 
 _exigir_acceso()
 
-MODOS = ["sincronizar", "reemplazar", "nueva", "agregar"]
+MODOS = ["sincronizar", "comparar", "reemplazar", "nueva", "agregar"]
 NOMBRES_MODO = {
     "sincronizar": "Actualizar mi hoja, respetando lo que ya tiene",
+    "comparar": "Comparar el mismo producto entre varias tiendas",
     "reemplazar": "Borrar la pestaña y escribirla de cero",
     "nueva": "Crear una pestaña nueva con la fecha",
     "agregar": "Pegar al final, para hacer historial",
@@ -119,8 +122,25 @@ NOMBRES_PRESET = list(PRESETS) + ["🎛️ Personalizado"]
 
 
 def limpiar_resultados():
-    for k in ("productos", "informe", "plan", "contexto"):
+    for k in (
+        "productos", "informe", "plan", "contexto", "plan_cmp", "contexto_cmp",
+        "agente_tabla", "agente_meta",
+    ):
         st.session_state.pop(k, None)
+
+
+def _nombre_tienda_de(url: str) -> str:
+    """Deriva un nombre de tienda legible a partir de su dominio, como
+    valor inicial de la columna en el modo «comparar» (el usuario lo puede
+    cambiar)."""
+    neto = urlparse(url if "//" in url else f"https://{url}").netloc
+    base = neto.replace("www.", "").split(":")[0].split(".")[0]
+    return base.capitalize() if base else "Tienda"
+
+
+@st.cache_data(ttl=45, show_spinner="Buscando tus hojas en Google Drive…")
+def _listar_hojas_cacheado(ruta_creds: str):
+    return sheets.listar_hojas(ruta_creds)
 
 
 # ═══════════════════════════════════════════════════ barra lateral
@@ -143,6 +163,26 @@ with st.sidebar:
             st.code(correo, language=None)
     else:
         st.warning("Todavía no encuentro el archivo. Puedes extraer y descargar en CSV sin él.", icon="⚠️")
+
+    st.divider()
+    st.header("🤖 Agente de Micaela")
+    with st.expander("¿Qué hace y qué no?"):
+        st.markdown(textos.AYUDA_AGENTE)
+
+    llave_agente_entorno = agente.llave_configurada()
+    if llave_agente_entorno:
+        st.success("Agente listo — usando la llave configurada por variable de entorno.", icon="✅")
+        llave_agente = llave_agente_entorno
+    else:
+        llave_agente = st.text_input(
+            "Llave de OpenAI (opcional)", type="password", placeholder="sk-…",
+            help="Solo se usa para pedirle su opinión al agente en la pestaña 5️⃣ Resultados. "
+                 "Vive únicamente en esta sesión del navegador, no se guarda en ningún archivo.",
+        )
+        if llave_agente:
+            st.caption("🔐 Guardada solo para esta sesión, no se escribe en disco.")
+        else:
+            st.caption("Sin llave, el resto de la app funciona igual; solo el agente queda apagado.")
 
     st.divider()
     st.header("⚙️ ¿Qué tan a fondo trabajo?")
@@ -271,36 +311,92 @@ with tab3:
     )
     st.info(textos.AYUDA_MODOS[modo])
 
-    d1, d2 = st.columns([3, 1])
-    destino = d1.text_input(
-        "Tu hoja de Google",
-        placeholder="https://docs.google.com/spreadsheets/d/…",
-        help="Pega la URL completa de tu hoja. Si la dejas vacía (y no estás sincronizando), "
-             "se crea una hoja nueva.",
-    )
-    pestana = d2.text_input("Pestaña", value="Productos", help="El nombre de la pestaña dentro de tu hoja.")
-
     estrategia = "auto"
-    if modo == "sincronizar":
-        with st.expander("Ver cómo se decide que un producto es «el mismo» de antes"):
-            st.markdown(textos.AYUDA_EMPAREJAMIENTO)
-        estrategia = st.selectbox(
-            "Cómo emparejar con lo que ya tienes",
-            ["auto", "sku", "url"],
-            format_func={
-                "auto": "Automático — SKU y, si no hay, la liga (recomendado)",
-                "sku": "Solo el SKU",
-                "url": "Solo la liga del producto",
-            }.get,
-        )
-        st.markdown("**Qué vas a ver en tu hoja:**")
-        st.markdown(textos.LEYENDA)
+    tienda_cmp = ""
 
-    if modo != "sincronizar":
+    if modo == "comparar":
+        st.markdown("**📚 Tus hojas** — elige el tablero al que le agregas esta tienda, o crea uno nuevo.")
+        NUEVO_TABLERO = "➕ Crear un tablero nuevo"
+        hojas = []
+        if conectado:
+            try:
+                hojas = _listar_hojas_cacheado(ruta_creds)
+            except sheets.ErrorSheets as e:
+                st.warning(f"No pude ver tus hojas todavía: {e}")
+        else:
+            st.warning("Conecta Google en la barra lateral para ver y elegir entre tus tableros.")
+
+        h1, h2 = st.columns([5, 1])
+        elegida = h1.selectbox(
+            "Tablero de comparación",
+            [NUEVO_TABLERO] + [h["nombre"] for h in hojas],
+            label_visibility="collapsed",
+        )
+        if h2.button("🔄", help="Actualizar la lista de tus hojas", use_container_width=True):
+            _listar_hojas_cacheado.clear()
+            st.rerun()
+
+        if elegida != NUEVO_TABLERO:
+            info_hoja = next(h for h in hojas if h["nombre"] == elegida)
+            destino = info_hoja["url"]
+            st.caption(f"Se va a escribir en **{info_hoja['nombre']}**, pestaña «Comparación».")
+        else:
+            destino = ""
+            st.caption("Se va a crear un tablero nuevo la primera vez que le des a Extraer.")
+
+        with st.expander("¿No la ves en la lista? Pega la liga a mano"):
+            manual = st.text_input(
+                "Liga de la hoja", placeholder="https://docs.google.com/spreadsheets/d/…",
+                label_visibility="collapsed",
+            )
+            if manual.strip():
+                destino = manual.strip()
+
+        tienda_cmp = st.text_input(
+            "¿Cómo se llama esta tienda?",
+            value=_nombre_tienda_de(url) if url.strip() else "",
+            help="Así se va a llamar la columna de precio de esta corrida, por ejemplo «precio · Liverpool».",
+        )
+        with st.expander("¿Cómo decide que es «el mismo producto» en otra tienda?"):
+            st.markdown(textos.AYUDA_COMPARAR)
+        pestana = "Comparación"
+
+    else:
+        d1, d2 = st.columns([3, 1])
+        destino = d1.text_input(
+            "Tu hoja de Google",
+            placeholder="https://docs.google.com/spreadsheets/d/…",
+            help="Pega la URL completa de tu hoja. Si la dejas vacía (y no estás sincronizando), "
+                 "se crea una hoja nueva.",
+        )
+        pestana = d2.text_input("Pestaña", value="Productos", help="El nombre de la pestaña dentro de tu hoja.")
+
+        if modo == "sincronizar":
+            with st.expander("Ver cómo se decide que un producto es «el mismo» de antes"):
+                st.markdown(textos.AYUDA_EMPAREJAMIENTO)
+            estrategia = st.selectbox(
+                "Cómo emparejar con lo que ya tienes",
+                ["auto", "sku", "url"],
+                format_func={
+                    "auto": "Automático — SKU y, si no hay, la liga (recomendado)",
+                    "sku": "Solo el SKU",
+                    "url": "Solo la liga del producto",
+                }.get,
+            )
+            st.markdown("**Qué vas a ver en tu hoja:**")
+            st.markdown(textos.LEYENDA)
+
+    if modo not in ("sincronizar", "comparar"):
         compartir = st.text_input(
             "Si creo una hoja nueva, compártela con",
             placeholder="tucorreo@gmail.com",
             help="La hoja nace a nombre del robot. Escribe tu correo para que también llegue a tu Drive.",
+        )
+    elif modo == "comparar" and not destino.strip():
+        compartir = st.text_input(
+            "Como es un tablero nuevo, compártelo con",
+            placeholder="tucorreo@gmail.com",
+            help="El tablero nace a nombre del robot. Escribe tu correo para que también llegue a tu Drive.",
         )
     else:
         compartir = ""
@@ -319,6 +415,8 @@ with tab4:
             st.error("Falta la dirección de la tienda. Ve a la pestaña **1️⃣ Tienda**.")
         elif modo == "sincronizar" and not destino.strip():
             st.error("Para sincronizar necesito la URL de tu hoja. Ve a la pestaña **3️⃣ Destino**.")
+        elif modo == "comparar" and not tienda_cmp.strip():
+            st.error("Falta el nombre de esta tienda para la comparación. Ve a la pestaña **3️⃣ Destino**.")
         else:
             limpiar_resultados()
             barra = st.progress(0.0)
@@ -359,6 +457,16 @@ with tab4:
                     )
                     st.session_state["contexto"] = contexto
                     st.session_state["plan"] = plan
+                elif modo == "comparar" and productos:
+                    estado.info("Leyendo tu tablero de comparación… (todavía no escribo nada)")
+                    contexto_cmp = sheets.leer_o_crear_hoja(
+                        destino, pestana, compartir_con=compartir, ruta_creds=ruta_creds
+                    )
+                    plan_cmp = comparar.construir_comparacion(
+                        contexto_cmp["encabezado"], contexto_cmp["filas"], productos, tienda_cmp
+                    )
+                    st.session_state["contexto_cmp"] = contexto_cmp
+                    st.session_state["plan_cmp"] = plan_cmp
                 barra.progress(1.0)
                 estado.empty()
                 transcurrido = time.time() - inicio
@@ -386,6 +494,8 @@ with tab5:
     informe = st.session_state.get("informe")
     plan = st.session_state.get("plan")
     contexto = st.session_state.get("contexto")
+    plan_cmp = st.session_state.get("plan_cmp")
+    contexto_cmp = st.session_state.get("contexto_cmp")
 
     if productos is None:
         st.info(
@@ -497,6 +607,81 @@ with tab5:
 
         st.divider()
 
+        # ─────────────────────────────────────────── agente de ia (opcional)
+        st.markdown("##### 🤖 Pregúntale al agente de Micaela")
+        st.caption(
+            "Describe un gusto, una persona o un criterio, y le pone un puntaje del 0 al 100 y "
+            "una razón corta a cada producto de la lista de arriba (respeta tu búsqueda y orden "
+            "actuales). Es una opinión de IA a partir del texto ya extraído, no analiza fotos ni "
+            "prueba productos — revisa tú antes de decidir, sobre todo en cosas perecederas."
+        )
+        col_pregunta, col_boton = st.columns([3, 1])
+        instruccion_agente = col_pregunta.text_input(
+            "¿Qué le pido?", label_visibility="collapsed",
+            placeholder="ej. Los que elegiría Tadao Ando · Los que usaría un electricista experto · Los más frescos",
+        )
+        llave_lista = agente.hay_agente(llave_agente)
+        preguntar = col_boton.button(
+            "✨ Preguntar", use_container_width=True,
+            disabled=not (instruccion_agente.strip() and llave_lista),
+        )
+        if not llave_lista:
+            st.caption("🔑 Pega una llave de IA en la barra lateral, en **🤖 Agente de Micaela**, para activar esto.")
+
+        if preguntar:
+            productos_vista = [productos[i] for i in vista.index]
+            try:
+                with st.spinner("El agente de Micaela está pensando…"):
+                    resultado_agente = agente.curar(productos_vista, instruccion_agente, llave=llave_agente)
+                filas_agente = [
+                    {
+                        "imagen": productos_vista[r["indice"]].imagen,
+                        "nombre": productos_vista[r["indice"]].nombre,
+                        "variante": productos_vista[r["indice"]].variante,
+                        "precio": productos_vista[r["indice"]].precio,
+                        "🤖 puntaje": r["puntaje"],
+                        "🤖 por qué": r["razon"],
+                        "url_producto": productos_vista[r["indice"]].url_producto,
+                    }
+                    for r in resultado_agente["resultados"]
+                ]
+                st.session_state["agente_tabla"] = pd.DataFrame(filas_agente)
+                st.session_state["agente_meta"] = {
+                    "instruccion": instruccion_agente,
+                    "evaluados": resultado_agente["evaluados"],
+                    "recortado": resultado_agente["recortado"],
+                }
+                st.toast("El agente terminó de opinar 🤖", icon="✨")
+            except agente.ErrorAgente as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"No pude preguntarle al agente: {e}")
+
+        agente_tabla = st.session_state.get("agente_tabla")
+        agente_meta = st.session_state.get("agente_meta")
+        if agente_tabla is not None and agente_meta:
+            st.markdown(f"**Para:** _{agente_meta['instruccion']}_")
+            if agente_meta["recortado"]:
+                st.caption(
+                    f"⚠️ Evalué los primeros {agente_meta['evaluados']} productos de esta vista; "
+                    "acorta tu búsqueda si quieres que cubra el resto."
+                )
+            st.dataframe(
+                agente_tabla, use_container_width=True, height=320, hide_index=True,
+                column_config={
+                    "imagen": st.column_config.ImageColumn("foto", width="small"),
+                    "precio": st.column_config.NumberColumn("precio"),
+                    "🤖 puntaje": st.column_config.ProgressColumn("🤖 puntaje", min_value=0, max_value=100, format="%d"),
+                    "url_producto": st.column_config.LinkColumn("liga", display_text="abrir"),
+                },
+            )
+            st.caption(
+                "Opinión generada por IA, no una garantía — el agente no ve fotos ni prueba "
+                "productos, solo razona sobre el texto extraído."
+            )
+
+        st.divider()
+
         # ─────────────────────────────────────────── sincronización
         if modo == "sincronizar" and plan is not None:
             st.subheader("Qué va a pasar en tu hoja")
@@ -569,8 +754,111 @@ with tab5:
                 except Exception as e:
                     st.error(f"No pude escribir en tu hoja: {e}")
 
+        # ─────────────────────────────────────────── comparación entre tiendas
+        elif modo == "comparar" and plan_cmp is not None:
+            st.subheader(f"Comparación: agregando «{plan_cmp.tienda}» a tu tablero")
+            r = plan_cmp.resumen
+            st.caption(
+                f"Tu tablero tenía **{r['renglones_previos']}** producto(s). Esta corrida trajo "
+                f"**{r['extraidos']}** de **{plan_cmp.tienda}** ({r['exactos']} coincidieron solos "
+                "por nombre)."
+            )
+
+            confirmados: dict[int, bool] = {}
+            if plan_cmp.candidatos:
+                st.markdown("**¿Alguno de estos es el mismo producto que ya tenías?**")
+                st.caption(
+                    "El nombre se parece pero no es idéntico, así que no los uní solos. Marca la "
+                    "casilla de los que **sí** sean el mismo producto; el resto se agrega como "
+                    "renglón nuevo."
+                )
+                df_revisar = pd.DataFrame([{
+                    "Es el mismo": False,
+                    f"Nuevo en {plan_cmp.tienda}": c.nombre_nuevo + (f" · {c.variante_nuevo}" if c.variante_nuevo else ""),
+                    "Se parece a (ya en tu tablero)": c.nombre_existente + (f" · {c.variante_existente}" if c.variante_existente else ""),
+                    "Qué tan parecido": f"{c.similitud:.0%}",
+                    "_indice": c.indice_producto,
+                } for c in plan_cmp.candidatos])
+                editado = st.data_editor(
+                    df_revisar.drop(columns=["_indice"]),
+                    use_container_width=True, hide_index=True, key="editor_comparacion",
+                    disabled=[f"Nuevo en {plan_cmp.tienda}", "Se parece a (ya en tu tablero)", "Qué tan parecido"],
+                )
+                for indice_fila, marcado in zip(df_revisar["_indice"], editado["Es el mismo"]):
+                    confirmados[int(indice_fila)] = bool(marcado)
+            else:
+                st.caption("No hubo coincidencias dudosas que revisar en esta corrida.")
+
+            tabla_final, resumen_final = plan_cmp.tabla(confirmados)
+            m = st.columns(3)
+            m[0].metric("✅ Con precio actualizado", resumen_final["actualizados_finales"])
+            m[1].metric("🆕 Nuevos en el tablero", resumen_final["nuevos_finales"])
+            m[2].metric("📋 Total tras aplicar", resumen_final["total_final"])
+
+            previa_cmp = pd.DataFrame(tabla_final[1:], columns=tabla_final[0])
+
+            categorias_cmp = sorted(c for c in previa_cmp.get("categoria", pd.Series(dtype=str)).unique() if c)
+            if categorias_cmp:
+                fcol1, fcol2 = st.columns([2, 1])
+                elegidas = fcol1.multiselect(
+                    "🗂️ Filtrar por categoría (lámparas, sillones, mesas…)",
+                    categorias_cmp, default=[],
+                    help="Útil cuando el tablero mezcla varias categorías, por ejemplo cuando estás "
+                         "amueblando toda una casa a la vez.",
+                )
+                if elegidas:
+                    previa_cmp = previa_cmp[previa_cmp["categoria"].isin(elegidas)]
+
+            config_cmp = {
+                "foto": st.column_config.ImageColumn("foto", width="small"),
+                comparar.COL_MEJOR: st.column_config.TextColumn(comparar.COL_MEJOR, width="medium"),
+                comparar.COL_DECISION: st.column_config.TextColumn(comparar.COL_DECISION, width="small"),
+            }
+            for columna in tabla_final[0]:
+                if columna.startswith(f"liga{comparar.SEPARADOR}"):
+                    config_cmp[columna] = st.column_config.LinkColumn(columna, display_text="abrir")
+            st.dataframe(
+                previa_cmp, use_container_width=True, height=380,
+                column_order=[
+                    "foto", "producto", "variante", "categoria",
+                    comparar.COL_MEJOR, comparar.COL_DECISION,
+                ] + [c for c in tabla_final[0] if c not in comparar.META],
+                column_config=config_cmp,
+            )
+            st.caption(
+                f"Mostrando {len(previa_cmp)} de {resumen_final['total_final']} producto(s) del tablero. "
+                f"La columna **{comparar.COL_MEJOR}** se recalcula sola cada vez que agregas una tienda "
+                "(el filtro de categoría solo afecta esta vista previa, no lo que se escribe en tu hoja)."
+            )
+
+            st.warning(
+                "Al aplicar, la pestaña «Comparación» se reescribe completa con esta tabla. No se "
+                "borran columnas de otras tiendas ni renglones que ya existían."
+                + (" Antes de escribir guardo una copia en la pestaña «Respaldo»." if respaldar else
+                   " **Tienes el respaldo apagado.**")
+            )
+
+            if st.button("Aplicar a mi tablero de comparación", type="primary"):
+                try:
+                    with st.spinner("Escribiendo tu tablero…"):
+                        res = sheets.aplicar_comparacion(
+                            contexto_cmp, tabla_final, nuevos=resumen_final["nuevos_finales"],
+                            respaldar=respaldar, pestana=pestana,
+                        )
+                    st.toast("Tu tablero quedó actualizado.", icon="✅")
+                    st.success(
+                        f"Listo. «{plan_cmp.tienda}» quedó agregada a {resumen_final['total_final']} "
+                        "producto(s) del tablero."
+                    )
+                    st.link_button("Abrir mi tablero", res["url"])
+                    limpiar_resultados()
+                except sheets.ErrorSheets as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"No pude escribir en tu tablero: {e}")
+
         # ─────────────────────────────────────────── modos simples
-        elif modo != "sincronizar":
+        elif modo in ("reemplazar", "nueva", "agregar"):
             st.subheader("Enviar a Google Sheets")
             st.caption(NOMBRES_MODO[modo] + ".")
             if st.button("Enviar a Google Sheets", type="primary"):

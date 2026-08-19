@@ -7,6 +7,9 @@ services:
     environment:
       # Contraseña de acceso. Sin ella, la app queda abierta a quien tenga la URL.
       - APP_PASSWORD=${APP_PASSWORD:-}
+      # Opcional: llave para el "agente de Micaela" (opinión con IA en la pestaña 5).
+      # Sin ella, el resto de la app funciona igual; solo esa caja queda apagada.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       # Opcional: monta aquí tu credenciales.json para escribir en Google Sheets.
       # Si no la usas, comenta esta línea — la app funciona igual para extraer y
