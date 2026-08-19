@@ -18,6 +18,11 @@ from sincronizar import CAMBIO, COL_ESTADO, FALTANTE, IGUAL, NUEVO, construir_pl
 
 NOMBRE_APP = "Scraper de Precios"
 PROPIETARIA = "Micaela Marengo"
+BIO_PROPIETARIA = (
+    "Diseñadora de interiores · Ciudad de México — Nueva York · "
+    "BFA en Diseño de Interiores, Pratt Institute"
+)
+SITIO_PROPIETARIA = "https://www.micaelamarengo.com/"
 
 st.set_page_config(page_title=f"{NOMBRE_APP} · {PROPIETARIA}", page_icon="🛒", layout="wide")
 
@@ -33,12 +38,17 @@ def _encabezado(icono: str = "🛒") -> None:
                 {NOMBRE_APP}
             </span>
         </div>
-        <div>
+        <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
             <span style="background:#16A34A1A;color:#16A34A;border:1px solid #16A34A55;
                          padding:0.2rem 0.75rem;border-radius:999px;font-size:0.85rem;
                          font-weight:600;letter-spacing:0.01em;">
                 👤 {PROPIETARIA} · uso exclusivo
             </span>
+            <span style="font-size:0.85rem;color:#5b6b62;">{BIO_PROPIETARIA}</span>
+            <a href="{SITIO_PROPIETARIA}" target="_blank"
+               style="font-size:0.85rem;font-weight:600;color:#16A34A;text-decoration:none;">
+                🌐 Ver portafolio ↗
+            </a>
         </div>
         """,
         unsafe_allow_html=True,
