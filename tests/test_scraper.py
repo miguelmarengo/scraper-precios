@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fixture_server import arrancar  # noqa: E402
 
-from scraper import scrapear  # noqa: E402
+from scraper import render, scrapear  # noqa: E402
 from scraper.core import normalizar_precio  # noqa: E402
 from scraper.shipping import extraer_tiempo_entrega  # noqa: E402
 
@@ -154,6 +154,38 @@ srv_r2, url_r2 = arrancar(modo="robots_bloqueado")
 prods_r2, informe_r2 = scrapear(url_r2, max_productos=50, delay=0.0, workers=2, respetar_robots=False)
 check(informe_r2["bloqueado_por_robots"] is False, "con 'Respetar robots.txt' apagado, ya no se reporta el bloqueo")
 srv_r2.shutdown()
+
+# ---------------------------------------------------------------- catálogo con JS
+print("\n[8] Tienda cuyo catálogo se arma con JavaScript (React/Vue/Angular)")
+srv_js, url_js = arrancar(modo="js_render")
+prods_js_sin, informe_js_sin = scrapear(url_js, max_productos=50, delay=0.0, workers=2)
+check(prods_js_sin == [], "SIN renderizar: no ve nada (requests no corre JavaScript)", str(len(prods_js_sin)))
+srv_js.shutdown()
+
+navegador_usable = False
+if render.disponible():
+    try:
+        _r = render.Renderizador()
+        _r.cerrar()
+        navegador_usable = True
+    except Exception:
+        pass  # el paquete está instalado, pero este entorno no deja abrir un navegador real
+
+if navegador_usable:
+    srv_js2, url_js2 = arrancar(modo="js_render")
+    prods_js_con, informe_js_con = scrapear(
+        url_js2, max_productos=50, delay=0.0, workers=2, renderizar_js=True
+    )
+    check(not informe_js_con["render_error"], "el navegador se abrió sin errores", informe_js_con["render_error"])
+    check(len(prods_js_con) == 1, "CON navegador: encuentra la ficha que solo existe tras correr JS", str(len(prods_js_con)))
+    if prods_js_con:
+        check(prods_js_con[0].nombre == "Silla renderizada", "es la ficha correcta", prods_js_con[0].nombre)
+    check(informe_js_con["render_paginas"] > 0, "el informe cuenta cuántas páginas se renderizaron", informe_js_con["render_paginas"])
+    srv_js2.shutdown()
+else:
+    print("  (omitido: no se pudo abrir un navegador real en este entorno — instala Playwright "
+          "('pip install playwright && playwright install chromium') y corre esto en una terminal "
+          "normal, no en un sandbox anidado, para probar esta parte)")
 
 # ---------------------------------------------------------------- resumen
 print("\n" + "=" * 60)

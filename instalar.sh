@@ -25,3 +25,8 @@ echo
 echo "Falta un paso: pon tu archivo de credenciales de Google en"
 echo "    ~/.config/scraper-precios/credenciales.json"
 echo "(instrucciones en el README, sección Google)"
+echo
+echo "Opcional: si alguna tienda arma su catálogo con JavaScript (React/Vue/Angular) y te da 0"
+echo "productos, en la barra lateral hay una casilla '🧪 Renderizar con navegador'. Para usarla,"
+echo "corre una sola vez (gratis, ~180 MB, es de código abierto):"
+echo "    ./.venv/bin/playwright install chromium"

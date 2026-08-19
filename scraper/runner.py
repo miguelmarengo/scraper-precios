@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from . import generic, shopify, woocommerce
+from . import generic, render, shopify, woocommerce
 from .core import COLUMNS, Fetcher, Producto, base_url, normalizar_url_entrada
 from .filtro import Filtro
 
@@ -50,6 +50,7 @@ def scrapear(
     delay: float = 0.6,
     workers: int = 4,
     prefiltrar_urls: bool = True,
+    renderizar_js: bool = False,
     progreso=None,
 ) -> tuple[list[Producto], dict]:
     """Devuelve (productos, informe)."""
@@ -75,40 +76,64 @@ def scrapear(
         if progreso:
             progreso(msg, pct)
 
-    paso("Detectando la plataforma…", 0.02)
-    plataforma = detectar_plataforma(fetcher, base)
-    paso(f"Plataforma detectada: {plataforma}", 0.06)
+    # El navegador (para catálogos armados con JavaScript) es opcional y se abre
+    # una sola vez para toda la corrida. Si el usuario lo pidió pero Playwright no
+    # está instalado, seguimos sin él (no se puede) y lo dejamos anotado en el
+    # informe para que la app lo explique, en vez de fallar toda la extracción.
+    renderizador = None
+    render_error = ""
+    if renderizar_js:
+        if render.disponible():
+            try:
+                paso("Abriendo un navegador para páginas con JavaScript…", 0.03)
+                renderizador = render.Renderizador()
+            except render.ErrorRenderizador as e:
+                render_error = str(e)
+        else:
+            render_error = (
+                "Pediste renderizar con navegador, pero Playwright no está instalado. "
+                "Corre 'pip install playwright && playwright install chromium' y vuelve a intentar."
+            )
 
-    def generico():
-        return generic.scrape(
-            fetcher,
-            entrada,
-            base,
-            max_productos=max_productos,
-            workers=workers,
-            filtro=f,
-            prefiltrar_urls=prefiltrar_urls,
-            progreso=progreso,
-            plataforma=plataforma,
-        )
+    try:
+        paso("Detectando la plataforma…", 0.02)
+        plataforma = detectar_plataforma(fetcher, base)
+        paso(f"Plataforma detectada: {plataforma}", 0.06)
 
-    if plataforma == "Shopify":
-        productos = shopify.scrape(
-            fetcher, base, max_productos=max_productos, detalle_inventario=detalle_inventario,
-            filtro=f, progreso=progreso,
-        )
-    elif plataforma == "WooCommerce":
-        productos = woocommerce.scrape(
-            fetcher, base, max_productos=max_productos, detalle_inventario=detalle_inventario,
-            filtro=f, progreso=progreso,
-        )
-    else:
-        productos = generico()
+        def generico():
+            return generic.scrape(
+                fetcher,
+                entrada,
+                base,
+                max_productos=max_productos,
+                workers=workers,
+                filtro=f,
+                prefiltrar_urls=prefiltrar_urls,
+                progreso=progreso,
+                plataforma=plataforma,
+                renderizador=renderizador,
+            )
 
-    # Si el atajo de la plataforma no dio nada, intenta el camino genérico.
-    if not productos and plataforma in ("Shopify", "WooCommerce") and not f.activo:
-        paso("La API de la plataforma no devolvió datos; probando el método genérico…", 0.3)
-        productos = generico()
+        if plataforma == "Shopify":
+            productos = shopify.scrape(
+                fetcher, base, max_productos=max_productos, detalle_inventario=detalle_inventario,
+                filtro=f, progreso=progreso,
+            )
+        elif plataforma == "WooCommerce":
+            productos = woocommerce.scrape(
+                fetcher, base, max_productos=max_productos, detalle_inventario=detalle_inventario,
+                filtro=f, progreso=progreso,
+            )
+        else:
+            productos = generico()
+
+        # Si el atajo de la plataforma no dio nada, intenta el camino genérico.
+        if not productos and plataforma in ("Shopify", "WooCommerce") and not f.activo:
+            paso("La API de la plataforma no devolvió datos; probando el método genérico…", 0.3)
+            productos = generico()
+    finally:
+        if renderizador is not None:
+            renderizador.cerrar()
 
     # Una sola fecha y hora para toda la corrida (no una por producto, que podría
     # variar por segundos según cuándo se leyó cada ficha) — así, si alguien necesita
@@ -133,6 +158,10 @@ def scrapear(
         # Es la causa más común de "corrió un segundo y no trajo nada".
         "bloqueado_por_robots": fetcher.bloqueado_por_robots(),
         "bloqueos_robots": fetcher.bloqueados_por_robots,
+        # Renderizado con navegador (JavaScript), si se pidió.
+        "render_solicitado": renderizar_js,
+        "render_error": render_error,
+        "render_paginas": renderizador.paginas_renderizadas if renderizador else 0,
         "filas": len(productos),
         "con_precio": sum(1 for p in productos if p.precio),
         "con_foto": sum(1 for p in productos if p.imagen),

@@ -216,11 +216,36 @@ En el CSV y el Excel esa columna sale como fórmula; si prefieres solo la liga, 
 | **Shopify** | Excelente. Usa el JSON público: todas las variantes, precios, SKU e inventario exacto. |
 | **WooCommerce** | Muy bueno. Usa la Store API: precios, stock y atributos. |
 | **Cualquier tienda con datos schema.org** | Bueno. Lee el JSON-LD que casi todas publican para aparecer en Google Shopping. |
-| **VTEX / Magento / catálogos en JavaScript** | Variable. Puede que salga poco; en ese caso hace falta un extractor a la medida. |
+| **VTEX / Magento / catálogos armados con JavaScript** | Variable sin ayuda extra — activa **🧪 Renderizar con navegador** (ver abajo). |
 
 El **inventario exacto** es el dato más difícil: muchas tiendas solo publican "disponible / agotado"
 y nunca el número de piezas. Cuando no lo publican, la columna sale vacía. Lo mismo con el tiempo de
 entrega: se detecta cuando la tienda lo escribe en la ficha o en su política de envíos.
+
+### Catálogos armados con JavaScript (React, Vue, Angular)
+
+Algunas tiendas no ponen los datos del producto en el HTML que llega por internet: los arma un
+programa en el propio navegador (JavaScript), después de cargar la página. Ahí una petición normal
+solo ve una página casi vacía.
+
+Para esos casos, en la barra lateral (**🛡️ Seguridad**) hay una casilla: **🧪 Renderizar con
+navegador si el catálogo usa JavaScript**. Al activarla, la app abre esas páginas con un navegador
+real y de código abierto (Chromium, vía [Playwright](https://playwright.dev)) y deja que corra su
+propio JavaScript — exactamente lo mismo que le pasa a cualquier persona que visita la página. Es
+más lento, así que solo actívala si de verdad la necesitas.
+
+La primera vez, instala el navegador (una sola vez, gratis, ~180 MB):
+
+```bash
+.venv/bin/playwright install chromium
+```
+
+(Si usas Docker, ya viene instalado en la imagen — ver la sección 13.)
+
+**Lo que esto no hace:** no evade `robots.txt` (sigue las mismas reglas que el resto de la app), no
+inicia sesión por ti si el sitio exige login, y no resuelve CAPTCHAs ni burla sistemas anti-bot
+como Cloudflare. Eso son controles de acceso deliberados del sitio; esta herramienta solo ve lo que
+cualquier visitante normal vería.
 
 ---
 
@@ -289,6 +314,9 @@ Con **Personalizado** aparecen estos controles, uno por uno:
 Por separado, siempre visibles bajo "🛡️ Seguridad":
 
 - **Respetar robots.txt** — déjalo encendido.
+- **🧪 Renderizar con navegador si el catálogo usa JavaScript** — apagado por defecto (es más
+  lento). Actívalo cuando una tienda te dé 0 productos y sospeches que arma su catálogo con
+  React/Vue/Angular. Ver la sección 7 para el detalle de qué hace y qué no.
 - **Guardar respaldo antes de sincronizar** — copia el contenido anterior a una pestaña
   «Respaldo» antes de reescribir la tuya.
 

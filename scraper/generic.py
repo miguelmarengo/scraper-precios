@@ -23,6 +23,28 @@ PISTAS_PRODUCTO = re.compile(
 )
 EXCLUIR = re.compile(r"\.(?:jpg|jpeg|png|gif|webp|svg|pdf|zip|css|js)(?:$|\?)|/(?:cart|carrito|login|cuenta|account|blog|search)/", re.I)
 
+# Señales de que la página necesita JavaScript para mostrar su contenido real:
+# frases explícitas de "activa JavaScript", o un <body> casi vacío de texto —
+# típico de catálogos armados con React/Vue/Angular que solo dejan un <div id="root">.
+_PISTAS_JS = re.compile(
+    r"you need to enable javascript|need to enable javascript|"
+    r"necesitas (?:activar|habilitar) (?:el )?javascript|"
+    r"please enable javascript|habilita (?:el )?javascript",
+    re.I,
+)
+
+
+def _parece_requerir_js(html: str) -> bool:
+    if _PISTAS_JS.search(html):
+        return True
+    solo_texto = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.I | re.S)
+    solo_texto = re.sub(r"<[^>]+>", " ", solo_texto)
+    # Una ficha de producto real casi siempre trae bastante más texto que esto
+    # (nombre, descripción, precio...); si casi no hay nada, probablemente el
+    # contenido de verdad lo inserta JavaScript después de cargar.
+    return len(solo_texto.strip()) < 200
+
+
 _LD = re.compile(r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", re.I | re.S)
 _META = re.compile(r"<meta[^>]+(?:property|name|itemprop)=[\"']([^\"']+)[\"'][^>]*content=[\"']([^\"']*)[\"']", re.I)
 _META_INV = re.compile(r"<meta[^>]+content=[\"']([^\"']*)[\"'][^>]*(?:property|name|itemprop)=[\"']([^\"']+)[\"']", re.I)
@@ -68,7 +90,7 @@ def _leer_sitemap(fetcher, url: str, profundidad=0, limite=8000) -> list[str]:
     return locs[:limite]
 
 
-def descubrir_urls(fetcher, entrada: str, base: str, max_urls: int, progreso=None) -> list[str]:
+def descubrir_urls(fetcher, entrada: str, base: str, max_urls: int, progreso=None, renderizador=None) -> list[str]:
     dominio = urlparse(base).netloc
     candidatas: list[str] = []
 
@@ -90,19 +112,34 @@ def descubrir_urls(fetcher, entrada: str, base: str, max_urls: int, progreso=Non
             r = fetcher.get(pagina)
             if r is None or r.status_code != 200:
                 continue
-            for href in _LINKS.findall(r.text):
+            html = r.text
+            # Si la página de entrada casi no tiene enlaces y parece armada con
+            # JavaScript, un navegador real puede ver los enlaces que el menú/catálogo
+            # inserta después de cargar (algo que un requests.get() nunca ve).
+            if renderizador is not None and len(_LINKS.findall(html)) < 3 and _parece_requerir_js(html):
+                if progreso:
+                    progreso(f"'{pagina}' parece necesitar JavaScript; renderizando con navegador…", None)
+                renderizado = renderizador.obtener_html(pagina)
+                if renderizado:
+                    html = renderizado
+            for href in _LINKS.findall(html):
                 u = urljoin(pagina, href).split("#")[0]
                 if urlparse(u).netloc == dominio and PISTAS_PRODUCTO.search(u) and not EXCLUIR.search(u):
                     productos.append(u)
 
     # Último recurso: cualquier URL interna del sitemap que no sea obviamente institucional.
+    # Solo se usa si de verdad mejora lo que ya se encontró — si el sitemap venía vacío (p. ej.
+    # una tienda armada con JavaScript, sin sitemap), esto no debe borrar lo que sí se encontró
+    # siguiendo enlaces (o renderizando con navegador) en el paso anterior.
     if len(productos) < 5:
-        productos = [
+        productos_holgados = [
             u for u in candidatas
             if urlparse(u).netloc == dominio
             and not EXCLUIR.search(u)
             and not re.search(r"/(?:pages?|blog|news|about|contacto|contact|policies|categor)", u, re.I)
         ]
+        if len(productos_holgados) > len(productos):
+            productos = productos_holgados
 
     return list(dict.fromkeys(productos))[:max_urls]
 
@@ -346,10 +383,12 @@ def scrape(
     prefiltrar_urls=True,
     progreso=None,
     plataforma="Genérico",
+    renderizador=None,
+    max_renderizados=40,
 ) -> list[Producto]:
     # Se descubre un margen extra de URLs porque el filtro descartará muchas.
     tope = max_productos * 8 if (filtro is not None and filtro.activo) else max_productos
-    urls = descubrir_urls(fetcher, entrada, base, min(tope, 6000), progreso)
+    urls = descubrir_urls(fetcher, entrada, base, min(tope, 6000), progreso, renderizador)
     if not urls:
         return []
 
@@ -360,25 +399,47 @@ def scrape(
     fallback_entrega = politica_envio_del_sitio(fetcher, base)
     filas: list[Producto] = []
     hechos = 0
+    candidatos_js: list[str] = []
 
     def trabajo(url):
         r = fetcher.get(url, allow_cache=False)
         if r is None or r.status_code != 200:
-            return None
-        return parsear_pagina(r.text, url, plataforma, fallback_entrega)
+            return None, None
+        producto = parsear_pagina(r.text, url, plataforma, fallback_entrega)
+        pide_js = url if (producto is None and _parece_requerir_js(r.text)) else None
+        return producto, pide_js
 
     # Se procesa por tandas para poder parar en cuanto se junten suficientes.
     n = max(1, workers)
     tanda = n * 4
     with ThreadPoolExecutor(max_workers=n) as pool:
         for inicio in range(0, len(urls), tanda):
-            for resultado in pool.map(trabajo, urls[inicio : inicio + tanda]):
+            for resultado, pide_js in pool.map(trabajo, urls[inicio : inicio + tanda]):
                 hechos += 1
                 if resultado and (filtro is None or filtro.coincide(resultado)):
                     filas.append(resultado)
+                elif pide_js and renderizador is not None:
+                    candidatos_js.append(pide_js)
             if progreso:
                 progreso(f"Leyendo fichas: {hechos}/{len(urls)} ({len(filas)} coinciden)", hechos / len(urls))
             if len(filas) >= max_productos:
                 break
+
+    # El navegador se usa aparte y en serie (Playwright, en su modo síncrono, no es
+    # seguro entre hilos) y solo para las fichas que de verdad lo necesitaron —
+    # abrir un navegador real por página es mucho más lento que una petición HTTP.
+    if renderizador is not None and candidatos_js and len(filas) < max_productos:
+        pendientes = candidatos_js[:max_renderizados]
+        for i, url in enumerate(pendientes, start=1):
+            if len(filas) >= max_productos:
+                break
+            html = renderizador.obtener_html(url)
+            if progreso:
+                progreso(f"Renderizando con navegador (JavaScript): {i}/{len(pendientes)}", None)
+            if not html:
+                continue
+            resultado = parsear_pagina(html, url, plataforma, fallback_entrega)
+            if resultado and (filtro is None or filtro.coincide(resultado)):
+                filas.append(resultado)
 
     return filas[:max_productos]

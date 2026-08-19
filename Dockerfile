@@ -9,6 +9,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Navegador opcional para catálogos armados con JavaScript (casilla "🧪 Renderizar
+# con navegador", en la barra lateral, bajo 🛡️ Seguridad). Gratis y de código
+# abierto (Playwright + Chromium). Se instala aquí, en la imagen, para no
+# depender de que el contenedor tenga internet cada vez que alguien lo use.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium && chmod -R a+rX /ms-playwright
+
 COPY . .
 RUN chown -R appuser:appuser /app
 

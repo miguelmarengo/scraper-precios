@@ -194,8 +194,11 @@ Hay tres datos que dependen de que la tienda quiera publicarlos:
   texto corrido de la ficha, puede colarse el dato de un producto sugerido en la misma página.
   Si un número te parece raro, la columna `url_producto` te lleva a comprobarlo.
 
-Tampoco funciona bien en tiendas cuyo catálogo se arma con JavaScript (VTEX, Magento y algunas
-hechas a medida): ahí puede salir muy poco o nada.
+Tampoco funciona bien, de entrada, en tiendas cuyo catálogo se arma con JavaScript (VTEX, Magento
+y algunas hechas a medida): ahí puede salir muy poco o nada. Para esos casos activa **🧪 Renderizar
+con navegador** en la barra lateral (**🛡️ Seguridad**) — abre esas fichas con un navegador real y
+de código abierto para que su JavaScript corra, igual que le pasaría a cualquier visitante. Es más
+lento, así que solo lo enciende quien lo necesita.
 """
 
 AYUDA_GOOGLE = """

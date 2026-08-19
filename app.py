@@ -248,6 +248,16 @@ with st.sidebar:
         help="Es el archivo donde el sitio declara qué rutas pide que no se rastreen. "
              "Déjalo encendido.",
     )
+    renderizar_js = st.checkbox(
+        "🧪 Renderizar con navegador si el catálogo usa JavaScript", value=False,
+        help="Gratis y de código abierto (Playwright + Chromium). Úsalo si una tienda te da 0 "
+             "productos y sospechas que arma su catálogo con React/Vue/Angular: abre cada ficha "
+             "sospechosa con un navegador de verdad y deja que corra su propio JavaScript, "
+             "exactamente como lo vería una persona. Es más lento, así que déjalo apagado si no "
+             "lo necesitas. **No** evade robots.txt, no inicia sesión por ti, y no resuelve "
+             "CAPTCHAs — solo ve lo que cualquier visitante vería. La primera vez necesitas correr "
+             "`pip install playwright && playwright install chromium` en tu terminal.",
+    )
     respaldar = st.checkbox(
         "Guardar respaldo antes de sincronizar", value=True,
         help="Copia el contenido anterior a una pestaña llamada «Respaldo».",
@@ -479,6 +489,7 @@ with tab4:
                         delay=float(delay),
                         workers=int(workers),
                         prefiltrar_urls=prefiltrar,
+                        renderizar_js=renderizar_js,
                         progreso=progreso,
                     )
                 st.session_state["productos"] = productos
@@ -558,10 +569,10 @@ with tab5:
                 "No es el filtro: nunca logré recibir una página completa de esta tienda, por más "
                 "que lo intenté varias veces. Suele pasar cuando el sitio te manda a una pantalla "
                 "de inicio de sesión antes de dejarte ver el catálogo (le pasa a tiendas que "
-                "comparten cuenta con otra más grande, por ejemplo), cuando bloquea visitas "
-                "automatizadas, o cuando todo su contenido se arma con JavaScript. Esta herramienta "
-                "no puede iniciar sesión ni ejecutar JavaScript, así que con este sitio en particular "
-                "no va a poder traer nada — no importa qué filtro uses ni qué tan amplio lo dejes."
+                "comparten cuenta con otra más grande, por ejemplo), o cuando bloquea visitas "
+                "automatizadas de forma activa. Esta herramienta no puede iniciar sesión por ti, así "
+                "que con este sitio en particular no va a poder traer nada — no importa qué filtro "
+                "uses ni qué tan amplio lo dejes."
             )
             if informe.get("detalle_error"):
                 st.caption(f"Detalle técnico: {informe['detalle_error']}")
@@ -570,11 +581,22 @@ with tab5:
                 "Encontré la tienda, pero ningún producto pasó el filtro. Prueba con menos palabras "
                 "(por ejemplo solo «sillon») o quita el filtro para ver primero qué trae el catálogo."
             )
+        elif informe and informe.get("render_solicitado") and informe.get("render_paginas", 0) > 0:
+            st.warning(
+                f"Usé un navegador real para leer {informe['render_paginas']} página(s) con "
+                "JavaScript, pero ninguna trajo datos de producto reconocibles. Es posible que este "
+                "sitio use un formato de catálogo distinto al que reconozco, o que además exija login."
+            )
         else:
             st.warning(
-                "No encontré productos con datos estructurados. Suele pasar cuando el catálogo se "
-                "arma con JavaScript o está detrás de un login."
+                "No encontré productos con datos estructurados. Si sospechas que el catálogo se arma "
+                "con JavaScript (React, Vue, Angular), prueba activando **🧪 Renderizar con "
+                "navegador** en la barra lateral (**🛡️ Seguridad**) y vuelve a extraer. Si el sitio "
+                "exige iniciar sesión antes de ver el catálogo, esta herramienta no puede hacerlo "
+                "por ti."
             )
+        if informe and informe.get("render_error"):
+            st.info(f"Sobre el navegador para JavaScript: {informe['render_error']}")
 
     if productos:
         st.subheader("Lo que encontré en la tienda")
@@ -586,6 +608,12 @@ with tab5:
         c[2].metric("Con precio", informe["con_precio"])
         c[3].metric("Con foto", informe["con_foto"])
         c[4].metric("Con medidas", informe["con_medidas"])
+
+        if informe.get("render_paginas", 0) > 0:
+            st.caption(
+                f"🧪 Usé un navegador real para leer {informe['render_paginas']} página(s) que "
+                "necesitaban JavaScript para mostrar su contenido."
+            )
 
         # ─────────────────────────────────── mejores ofertas (si hay descuentos)
         descuentos = pd.to_numeric(df["descuento_pct"], errors="coerce")

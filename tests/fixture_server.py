@@ -181,6 +181,45 @@ WOO_PDP = """<!doctype html><html><body>
 </body></html>"""
 
 
+# --------------------------------------------------------- catálogo armado con JS
+# Simula una tienda tipo React/Vue: el HTML que llega por HTTP está casi vacío
+# (el contenido real lo inserta JavaScript en el navegador), así que un
+# requests.get() normal no puede ver ni los enlaces ni las fichas de producto.
+
+JS_RENDER_HOME = """<!doctype html><html><body>
+<div id="root"></div>
+<script>
+// Se construye por partes y con createElement (no una cadena con "<a href=...")
+// para que un requests.get() normal NO pueda ver este enlace ni por casualidad
+// con una expresión regular: de verdad hace falta correr este JavaScript.
+var enlace = document.createElement("a");
+enlace.setAttribute("h" + "ref", "/producto" + "/silla-js");
+enlace.textContent = "Silla JS";
+document.getElementById("root").appendChild(enlace);
+</script>
+</body></html>"""
+
+
+def _pagina_pdp_js(nombre, sku, precio, disponible=True):
+    ld = _ld(nombre, sku, precio, disponible)
+    fragmento = f'<script type="application/ld+json">{ld}</script>'
+    # Para meter un </script> dentro de otro <script> hay que escapar la barra
+    # como \/  (un solo backslash): así el HTML de afuera no corta el bloque de
+    # más, y al ejecutarse el JavaScript, \/  se convierte en / de nuevo — con
+    # json.dumps() se duplicaría el backslash y el innerHTML resultante nunca
+    # cerraría su propio <script>.
+    js_seguro = fragmento.replace("\\", "\\\\").replace("'", "\\'").replace("</script>", "<\\/script>")
+    return (
+        # Sin <title> con texto: así, si algo llega a leer esta página SIN correr
+        # su JavaScript, no hay ningún texto de sobra que un fallback pueda
+        # confundir con el nombre del producto.
+        "<!doctype html><html><head></head><body>"
+        '<div id="app"></div><script>'
+        f"document.getElementById('app').innerHTML = '{js_seguro}';"
+        "</script></body></html>"
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -219,6 +258,15 @@ class Handler(BaseHTTPRequestHandler):
             # bloqueado por robots.txt), pero por si acaso: si llega, es una falla del
             # fetcher, no de la tienda.
             return self._responder("<html><body>No debiste llegar aquí.</body></html>")
+
+        if modo == "js_render":
+            if ruta in ("/", "/index.html"):
+                return self._responder(JS_RENDER_HOME)
+            if ruta == "/producto/silla-js":
+                return self._responder(_pagina_pdp_js("Silla renderizada", "SJS-001", "2499.00"))
+            # Sin sitemap: así se fuerza el camino de "seguir enlaces de la portada",
+            # que es justo el que necesita el navegador para ver el enlace real.
+            return self._responder("no", "text/plain", 404)
 
         if modo == "login_wall":
             # Simula una tienda que redirige todo (incluida la portada) a un login externo
