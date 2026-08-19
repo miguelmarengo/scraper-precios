@@ -16,6 +16,7 @@ import comparar
 import sheets
 import textos
 from scraper import COLUMNS, a_tabla, scrapear
+from scraper.filtro import Filtro
 from sincronizar import CAMBIO, COL_ESTADO, FALTANTE, IGUAL, NUEVO, construir_plan
 
 NOMBRE_APP = "Scraper de Precios"
@@ -26,7 +27,28 @@ BIO_PROPIETARIA = (
 )
 SITIO_PROPIETARIA = "https://www.micaelamarengo.com/"
 
+_AVISO_CSV_RESPALDO = (
+    "No se perdió nada de lo que encontré: sube un poco más arriba en esta misma pestaña "
+    "y descarga el **CSV** o **Excel** — llevan la fecha y hora de esta corrida en el nombre "
+    "del archivo, así que puedes revisar los resultados aunque tu Google Sheet no funcione."
+)
+
 st.set_page_config(page_title=f"{NOMBRE_APP} · {PROPIETARIA}", page_icon="🛒", layout="wide")
+
+_DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MESES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _fecha_amigable(momento: datetime) -> str:
+    """'miércoles 19 de agosto de 2026, 3:01 p.m.' — sin depender del locale del sistema."""
+    dia = _DIAS[momento.weekday()]
+    mes = _MESES[momento.month - 1]
+    hora12 = momento.strftime("%I:%M").lstrip("0") or "12:00"
+    sufijo = "a.m." if momento.hour < 12 else "p.m."
+    return f"{dia} {momento.day} de {mes} de {momento.year}, {hora12} {sufijo}"
 
 
 def _encabezado(icono: str = "🛒") -> None:
@@ -281,11 +303,24 @@ with tab2:
         placeholder="sillones blancos     ·     verduras verdes     ·     sofa | loveseat -piel",
         label_visibility="collapsed",
     )
+    if filtro_txt.strip():
+        _f = Filtro(filtro_txt)
+        _grupos_txt = " · o · ".join(" Y ".join(f"«{t}»" for t in g) for g in _f.grupos)
+        _linea = f"🔎 Va a traer productos que tengan {_grupos_txt}" if _grupos_txt else ""
+        if _f.exclusiones:
+            _excl_txt = " ni ".join(f"«{t}»" for t in _f.exclusiones)
+            _linea += f", pero **nunca** los que digan {_excl_txt}" if _linea else f"🔎 Va a **descartar** los que digan {_excl_txt}"
+        if _linea:
+            st.caption(
+                _linea + " — si dos palabras van juntas, se piden **las dos a la vez**; "
+                "para «cualquiera de ellas» sepáralas con `|`."
+            )
     with st.expander("Ver todas las formas de escribir el filtro"):
         st.markdown(textos.AYUDA_FILTRO)
 
     st.write("")
     st.markdown("**Filtros de precio y disponibilidad (también opcionales):**")
+    st.caption("Déjalos los dos en 0 para no limitar por precio — 0 no significa «gratis», significa «sin límite».")
     f1, f2, f3 = st.columns([1, 1, 2])
     precio_min = f1.number_input("Precio mínimo", min_value=0.0, value=0.0, step=100.0, help="0 = sin mínimo")
     precio_max = f2.number_input("Precio máximo", min_value=0.0, value=0.0, step=100.0, help="0 = sin tope")
@@ -503,7 +538,34 @@ with tab5:
             "al botón en **4️⃣ Extraer**."
         )
     elif not productos:
-        if informe and informe.get("filtro_activo"):
+        if informe and informe.get("bloqueado_por_robots"):
+            n = informe.get("bloqueos_robots", 0)
+            st.error(
+                f"No es el filtro: el archivo **robots.txt** de esta tienda le pide a los robots "
+                f"que no lean estas páginas, y tienes activado «Respetar robots.txt» — así que ni "
+                f"siquiera llegué a intentarlo (por eso terminó tan rápido, en cuestión de segundos, "
+                f"y sin traer nada). Bloqueé {n} intento(s) por esta regla."
+            )
+            st.info(
+                "¿Qué puedes hacer? Si es tu propia tienda, o el sitio te dio permiso para leer su "
+                "catálogo así, ve a la barra lateral, abre **🛡️ Seguridad** y apaga **«Respetar "
+                "robots.txt»**, luego vuelve a extraer. Si no es tu tienda, ten cuidado: muchos "
+                "sitios ponen esa regla justamente para pedir que no se les extraigan datos "
+                "automáticamente, y desactivar esto ignora ese pedido."
+            )
+        elif informe and informe.get("conexion_bloqueada"):
+            st.error(
+                "No es el filtro: nunca logré recibir una página completa de esta tienda, por más "
+                "que lo intenté varias veces. Suele pasar cuando el sitio te manda a una pantalla "
+                "de inicio de sesión antes de dejarte ver el catálogo (le pasa a tiendas que "
+                "comparten cuenta con otra más grande, por ejemplo), cuando bloquea visitas "
+                "automatizadas, o cuando todo su contenido se arma con JavaScript. Esta herramienta "
+                "no puede iniciar sesión ni ejecutar JavaScript, así que con este sitio en particular "
+                "no va a poder traer nada — no importa qué filtro uses ni qué tan amplio lo dejes."
+            )
+            if informe.get("detalle_error"):
+                st.caption(f"Detalle técnico: {informe['detalle_error']}")
+        elif informe and informe.get("filtro_activo"):
             st.warning(
                 "Encontré la tienda, pero ningún producto pasó el filtro. Prueba con menos palabras "
                 "(por ejemplo solo «sillon») o quita el filtro para ver primero qué trae el catálogo."
@@ -593,11 +655,20 @@ with tab5:
             st.markdown(textos.AYUDA_LIMITES)
 
         dominio = (urlparse(informe["url"]).netloc or "tienda").replace("www.", "").split(":")[0]
-        sello = datetime.now().strftime("%Y%m%d-%H%M")
+        corrida_txt = informe.get("corrida", "")
+        corrida_dt = datetime.strptime(corrida_txt, "%Y-%m-%d %H:%M") if corrida_txt else datetime.now()
+        sello = corrida_dt.strftime("%Y%m%d-%H%M")
         nombre_base = f"precios-{dominio}-{sello}"
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Productos")
+        st.markdown(f"**🕒 Esta corrida:** {_fecha_amigable(corrida_dt)}")
+        st.caption(
+            "Descarga el archivo aquí abajo si prefieres revisar los resultados sin depender de "
+            "Google Sheets — el nombre del archivo y la columna «fecha_extraccion» llevan esta "
+            "misma fecha y hora, para que sepas exactamente de cuándo es cada corrida. Se guarda "
+            "en la carpeta de descargas de tu navegador (normalmente **Downloads**)."
+        )
         b1, b2, _ = st.columns([1, 1, 3])
         b1.download_button("⬇️ Descargar CSV", df.to_csv(index=False).encode("utf-8-sig"),
                            f"{nombre_base}.csv", "text/csv", use_container_width=True)
@@ -751,8 +822,10 @@ with tab5:
                     limpiar_resultados()
                 except sheets.ErrorSheets as e:
                     st.error(str(e))
+                    st.info(_AVISO_CSV_RESPALDO)
                 except Exception as e:
                     st.error(f"No pude escribir en tu hoja: {e}")
+                    st.info(_AVISO_CSV_RESPALDO)
 
         # ─────────────────────────────────────────── comparación entre tiendas
         elif modo == "comparar" and plan_cmp is not None:
@@ -854,8 +927,10 @@ with tab5:
                     limpiar_resultados()
                 except sheets.ErrorSheets as e:
                     st.error(str(e))
+                    st.info(_AVISO_CSV_RESPALDO)
                 except Exception as e:
                     st.error(f"No pude escribir en tu tablero: {e}")
+                    st.info(_AVISO_CSV_RESPALDO)
 
         # ─────────────────────────────────────────── modos simples
         elif modo in ("reemplazar", "nueva", "agregar"):
@@ -878,5 +953,7 @@ with tab5:
                         )
                 except sheets.ErrorSheets as e:
                     st.error(str(e))
+                    st.info(_AVISO_CSV_RESPALDO)
                 except Exception as e:
                     st.error(f"No pude escribir en Sheets: {e}")
+                    st.info(_AVISO_CSV_RESPALDO)

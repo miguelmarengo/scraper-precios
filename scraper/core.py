@@ -131,6 +131,19 @@ class Fetcher:
         self._lock = threading.Lock()
         self._robots: dict[str, robotparser.RobotFileParser | None] = {}
         self._cache: dict[str, requests.Response | None] = {}
+        # Diagnóstico: si intentamos varias veces y nunca llegó ni una respuesta real, es
+        # casi seguro que el sitio nos está bloqueando o redirigiendo (a un login, por
+        # ejemplo) antes de dejarnos ver el catálogo — muy distinto de "el filtro fue muy
+        # estricto". Ver `sin_ninguna_respuesta`.
+        self.peticiones = 0
+        self.con_respuesta = 0
+        self.ultimo_error = ""
+        # Cuántas URLs no se llegaron a pedir porque robots.txt las prohíbe. Esto NO
+        # cuenta como "petición" (ver `contar` en get()), así que sin este contador
+        # aparte, un sitio que bloquea todo por robots.txt terminaba en segundos con
+        # 0 productos y SIN ningún diagnóstico — parecía que el filtro no traía nada,
+        # cuando en realidad nunca se intentó leer ni una sola página.
+        self.bloqueados_por_robots = 0
 
     # -- robots -------------------------------------------------------
     def _robots_for(self, url: str):
@@ -173,8 +186,19 @@ class Fetcher:
             return self._cache[clave]
 
         if not self.permitido(url):
+            if not urlparse(url).path.rstrip("/").endswith("robots.txt"):
+                with self._lock:
+                    self.bloqueados_por_robots += 1
             self._cache[clave] = None
             return None
+
+        # robots.txt no cuenta para el diagnóstico: muchos sitios lo sirven sin
+        # problema aunque el resto del sitio esté detrás de un login, así que un
+        # robots.txt exitoso no dice nada útil sobre si vamos a poder leer el catálogo.
+        contar = not urlparse(url).path.rstrip("/").endswith("robots.txt")
+        if contar:
+            with self._lock:
+                self.peticiones += 1
 
         resp = None
         for intento in range(reintentos + 1):
@@ -185,14 +209,36 @@ class Fetcher:
                     time.sleep(2 + intento * 3)
                     continue
                 break
-            except requests.RequestException:
+            except requests.TooManyRedirects:
+                self.ultimo_error = "demasiadas redirecciones (posible muro de inicio de sesión)"
+                resp = None
+                break
+            except requests.RequestException as e:
+                self.ultimo_error = str(e) or type(e).__name__
                 if intento == reintentos:
                     resp = None
                 else:
                     time.sleep(1 + intento)
+        if resp is not None and contar:
+            with self._lock:
+                self.con_respuesta += 1
         if allow_cache:
             self._cache[clave] = resp
         return resp
+
+    def sin_ninguna_respuesta(self, minimo_intentos: int = 3) -> bool:
+        """True si ya intentamos varias veces y ni una sola vez llegó una respuesta real:
+        casi siempre significa que el sitio bloquea, redirige (a un login) o exige
+        JavaScript antes de mostrar nada — no que el filtro sea muy estricto."""
+        return self.peticiones >= minimo_intentos and self.con_respuesta == 0
+
+    def bloqueado_por_robots(self) -> bool:
+        """True si robots.txt nos hizo rechazar al menos una URL nosotros mismos
+        (no el sitio). No exige que TODAS las peticiones hayan sido bloqueadas: es
+        común que la portada sí esté permitida pero el sitemap o las fichas de
+        producto no — y aun así, el resultado final es 0 productos sin explicación,
+        que es justo el caso que hay que diagnosticar."""
+        return self.bloqueados_por_robots > 0
 
     def get_json(self, url: str, *, params=None):
         r = self.get(url, params=params)

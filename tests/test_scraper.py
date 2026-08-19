@@ -90,6 +90,16 @@ if s:
 m = por_nombre.get("Mesa de roble")
 if m:
     check(m.disponible == "No" and m.inventario == "0", "OutOfStock -> No / 0", f"{m.disponible}/{m.inventario}")
+check("corrida" in informe and bool(informe["corrida"]), "el informe trae una fecha/hora de corrida", str(informe.get("corrida")))
+check(
+    len({p.fecha_extraccion for p in prods}) == 1,
+    "todos los productos de la misma corrida llevan EXACTAMENTE la misma fecha_extraccion",
+    str([p.fecha_extraccion for p in prods]),
+)
+check(
+    prods[0].fecha_extraccion == informe["corrida"] if prods else True,
+    "la fecha_extraccion de los productos coincide con informe['corrida']",
+)
 srv_g.shutdown()
 
 # ---------------------------------------------------------------- WooCommerce
@@ -113,6 +123,37 @@ prensa = por_sku.get("PF-600")
 if prensa:
     check(prensa.disponible == "No" and prensa.inventario == "0", "agotado -> No / 0", f"{prensa.disponible}/{prensa.inventario}")
 srv_w.shutdown()
+
+# ---------------------------------------------------------------- muro de login
+print("\n[6] Tienda que redirige todo a un login (como West Elm México / Liverpool)")
+srv_l, url_l = arrancar(modo="login_wall")
+prods_l, informe_l = scrapear(url_l, filtro="sillon blanco", max_productos=50, delay=0.0, workers=2)
+check(prods_l == [], "no encuentra productos (no puede pasar del login)", str(len(prods_l)))
+check(informe_l["conexion_bloqueada"] is True,
+      "se marca como bloqueo de conexión, NO como filtro muy estricto", str(informe_l))
+check(informe_l["filtro_activo"] is True, "el filtro sí estaba activo (para probar que no confunde una cosa con la otra)")
+check(bool(informe_l["detalle_error"]), "queda un detalle técnico del motivo", informe_l["detalle_error"])
+srv_l.shutdown()
+
+# ---------------------------------------------------------------- robots.txt
+print("\n[7] Tienda cuyo robots.txt permite la portada pero bloquea el sitemap y las fichas")
+srv_r, url_r = arrancar(modo="robots_bloqueado")
+prods_r, informe_r = scrapear(url_r, filtro="sillon", max_productos=50, delay=0.0, workers=2, respetar_robots=True)
+check(prods_r == [], "no encuentra productos (robots.txt lo prohíbe)", str(len(prods_r)))
+check(
+    informe_r["bloqueado_por_robots"] is True,
+    "se marca como bloqueo por robots.txt, NO como conexión caída ni filtro estricto",
+    str(informe_r),
+)
+check(informe_r["conexion_bloqueada"] is False, "NO se confunde con conexión bloqueada (son causas distintas)")
+check(informe_r["bloqueos_robots"] > 0, "queda contado cuántos intentos se bloquearon", informe_r["bloqueos_robots"])
+srv_r.shutdown()
+
+# Con "Respetar robots.txt" apagado, si debería poder leer el catálogo con normalidad.
+srv_r2, url_r2 = arrancar(modo="robots_bloqueado")
+prods_r2, informe_r2 = scrapear(url_r2, max_productos=50, delay=0.0, workers=2, respetar_robots=False)
+check(informe_r2["bloqueado_por_robots"] is False, "con 'Respetar robots.txt' apagado, ya no se reporta el bloqueo")
+srv_r2.shutdown()
 
 # ---------------------------------------------------------------- resumen
 print("\n" + "=" * 60)

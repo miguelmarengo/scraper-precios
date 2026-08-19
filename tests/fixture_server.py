@@ -200,9 +200,35 @@ class Handler(BaseHTTPRequestHandler):
         self.server.peticiones.append(ruta)
 
         if ruta == "/robots.txt":
+            if modo == "robots_bloqueado":
+                # Caso real y común: la portada SÍ se puede leer (por eso el chequeo rápido
+                # de la URL de entrada no salta), pero el sitemap y las fichas de producto
+                # están prohibidas. Sin el diagnóstico de robots.txt, esto se ve igual que
+                # "el catálogo está vacío": corre un segundo y no trae nada, sin explicación.
+                return self._responder(
+                    "User-agent: *\nDisallow: /sitemap.xml\nDisallow: /producto/\n", "text/plain"
+                )
             return self._responder(
                 f"User-agent: *\nDisallow: /admin\nSitemap: http://{host}/sitemap.xml\n", "text/plain"
             )
+
+        if modo == "robots_bloqueado":
+            if ruta in ("/", "/index.html"):
+                return self._responder("<html><body>Portada permitida, pero sin ligas útiles.</body></html>")
+            # No debería llegar ninguna petición más allá de la portada (todo lo demás está
+            # bloqueado por robots.txt), pero por si acaso: si llega, es una falla del
+            # fetcher, no de la tienda.
+            return self._responder("<html><body>No debiste llegar aquí.</body></html>")
+
+        if modo == "login_wall":
+            # Simula una tienda que redirige todo (incluida la portada) a un login externo
+            # antes de mostrar nada — como le pasa a algunas tiendas que comparten cuenta
+            # con otra más grande. requests debe agotar sus redirecciones y devolver None.
+            self.send_response(302)
+            self.send_header("Location", f"http://{host}/login?redir={ruta}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
 
         if modo == "woo":
             if ruta in ("/wp-json/wc/store/v1/products", "/wp-json/wc/store/products"):

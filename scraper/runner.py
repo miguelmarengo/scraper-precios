@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from . import generic, shopify, woocommerce
 from .core import COLUMNS, Fetcher, Producto, base_url, normalizar_url_entrada
@@ -109,11 +110,29 @@ def scrapear(
         paso("La API de la plataforma no devolvió datos; probando el método genérico…", 0.3)
         productos = generico()
 
+    # Una sola fecha y hora para toda la corrida (no una por producto, que podría
+    # variar por segundos según cuándo se leyó cada ficha) — así, si alguien necesita
+    # el CSV en lugar de la hoja de Google, sabe exactamente cuándo se hizo esta extracción.
+    corrida = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+    for p in productos:
+        p.fecha_extraccion = corrida
+
     informe = {
+        "corrida": corrida,
         "url": entrada,
         "plataforma": plataforma,
         "filtro": f.consulta,
         "filtro_activo": f.activo,
+        # Si nunca llegó ni una sola respuesta real del sitio, el problema no es el
+        # filtro: es que algo (login, bloqueo anti-robots, JavaScript) nos está
+        # cerrando el paso antes de ver el catálogo.
+        "conexion_bloqueada": fetcher.sin_ninguna_respuesta(),
+        "detalle_error": fetcher.ultimo_error,
+        # Distinto del caso anterior: aquí ni siquiera lo intentamos, porque el propio
+        # robots.txt de la tienda lo prohíbe y tenemos "Respetar robots.txt" activado.
+        # Es la causa más común de "corrió un segundo y no trajo nada".
+        "bloqueado_por_robots": fetcher.bloqueado_por_robots(),
+        "bloqueos_robots": fetcher.bloqueados_por_robots,
         "filas": len(productos),
         "con_precio": sum(1 for p in productos if p.precio),
         "con_foto": sum(1 for p in productos if p.imagen),
