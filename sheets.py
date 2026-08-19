@@ -26,11 +26,28 @@ def ruta_credenciales(ruta: str | None = None) -> str:
     return os.path.expanduser(ruta)
 
 
+def _credenciales_en_secrets() -> dict | None:
+    """En Streamlit Community Cloud no hay disco persistente para un archivo propio:
+    la cuenta de servicio se guarda como "Secret" (TOML) bajo la llave
+    [gcp_service_account]. Localmente sigue funcionando el archivo de siempre."""
+    try:
+        import streamlit as st
+
+        datos = st.secrets.get("gcp_service_account")
+        return dict(datos) if datos else None
+    except Exception:
+        return None
+
+
 def hay_credenciales(ruta: str | None = None) -> bool:
-    return os.path.isfile(ruta_credenciales(ruta))
+    return _credenciales_en_secrets() is not None or os.path.isfile(ruta_credenciales(ruta))
 
 
 def email_de_servicio(ruta: str | None = None) -> str:
+    secretos = _credenciales_en_secrets()
+    if secretos:
+        return secretos.get("client_email", "")
+
     import json
 
     p = ruta_credenciales(ruta)
@@ -52,6 +69,11 @@ def _cliente(ruta: str | None = None):
             "Faltan las librerías de Google. Instálalas con:\n"
             "    pip install gspread google-auth"
         ) from e
+
+    secretos = _credenciales_en_secrets()
+    if secretos:
+        creds = Credentials.from_service_account_info(secretos, scopes=ALCANCES)
+        return gspread.authorize(creds)
 
     p = ruta_credenciales(ruta)
     if not os.path.isfile(p):

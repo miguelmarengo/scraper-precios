@@ -309,7 +309,50 @@ doble que registra cada llamada.
 
 ---
 
-## 11. Notas legales
+## 11. Publicarla en internet (Streamlit Community Cloud)
+
+La app es una interfaz de Streamlit: necesita un servidor Python corriendo, así que **no
+funciona en plataformas pensadas solo para páginas estáticas o funciones sin estado (por
+ejemplo Vercel)**. La forma gratuita y sin complicaciones de darle una URL pública es
+[Streamlit Community Cloud](https://share.streamlit.io), hecho justo para este tipo de apps:
+
+1. Sube el proyecto a un repositorio de GitHub (si ya lo hiciste, sigue en el paso 2).
+2. Entra a <https://share.streamlit.io> e inicia sesión con tu cuenta de GitHub.
+3. **Create app** → elige tu repositorio, la rama `main` y el archivo principal `app.py`.
+4. Dale **Deploy**. En un par de minutos tienes una URL como
+   `https://tu-app.streamlit.app` que puedes compartir con quien quieras.
+
+**Sobre las credenciales de Google:** ahí no existe una carpeta personal como
+`~/.config/scraper-precios/`, así que el archivo `credenciales.json` no aplica. En su lugar:
+
+1. En el panel de tu app dentro de Streamlit Cloud, abre **Settings → Secrets**.
+2. Pega el contenido de tu archivo `credenciales.json` con este formato (con corchetes y
+   comillas triples, tal cual):
+
+   ```toml
+   [gcp_service_account]
+   type = "service_account"
+   project_id = "..."
+   private_key_id = "..."
+   private_key = """-----BEGIN PRIVATE KEY-----
+   ...
+   -----END PRIVATE KEY-----
+   """
+   client_email = "algo@tu-proyecto.iam.gserviceaccount.com"
+   client_id = "..."
+   token_uri = "https://oauth2.googleapis.com/token"
+   ```
+
+3. Guarda. La app detecta automáticamente estos "Secrets" y los usa en vez de buscar un
+   archivo — no necesitas cambiar nada más. El resto (compartir la hoja con el correo del
+   robot, paso 8 de la sección 3) sigue igual.
+
+Si solo quieres extraer datos y descargar el CSV/Excel, ni siquiera necesitas configurar
+Google: esa parte funciona igual sin ningún ajuste.
+
+---
+
+## 12. Notas legales
 
 Extraer datos públicos de precios es una práctica común, pero conviene tener en cuenta que:
 
