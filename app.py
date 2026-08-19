@@ -16,10 +16,33 @@ import textos
 from scraper import COLUMNS, a_tabla, scrapear
 from sincronizar import CAMBIO, COL_ESTADO, FALTANTE, IGUAL, NUEVO, construir_plan
 
-NOMBRE_APP = "Scraper de Precios · Micaela"
-SUBTITULO_APP = "Herramienta interna — uso exclusivo de Micaela"
+NOMBRE_APP = "Scraper de Precios"
+PROPIETARIA = "Micaela Marengo"
 
-st.set_page_config(page_title=NOMBRE_APP, page_icon="🛒", layout="wide")
+st.set_page_config(page_title=f"{NOMBRE_APP} · {PROPIETARIA}", page_icon="🛒", layout="wide")
+
+
+def _encabezado(icono: str = "🛒") -> None:
+    """Título + insignia con el nombre de la propietaria, en un solo bloque
+    reutilizable (se ve igual en la pantalla de acceso y en la app)."""
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.35rem;">
+            <span style="font-size:2.3rem;line-height:1;">{icono}</span>
+            <span style="font-size:2.1rem;font-weight:700;line-height:1;color:#1F2A24;">
+                {NOMBRE_APP}
+            </span>
+        </div>
+        <div>
+            <span style="background:#16A34A1A;color:#16A34A;border:1px solid #16A34A55;
+                         padding:0.2rem 0.75rem;border-radius:999px;font-size:0.85rem;
+                         font-weight:600;letter-spacing:0.01em;">
+                👤 {PROPIETARIA} · uso exclusivo
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _clave_de_acceso() -> str:
@@ -38,8 +61,8 @@ def _exigir_acceso() -> None:
     if not clave or st.session_state.get("autenticado"):
         return
 
-    st.title(f"🔒 {NOMBRE_APP}")
-    st.caption(SUBTITULO_APP)
+    _encabezado("🔒")
+    st.write("")
     st.write("Esta herramienta es privada. Pide la contraseña a quien te la comparta.")
 
     with st.form("form_acceso"):
@@ -159,8 +182,8 @@ with st.sidebar:
     )
 
 # ═══════════════════════════════════════════════════ encabezado
-st.title(f"🛒 {NOMBRE_APP}")
-st.caption(SUBTITULO_APP)
+_encabezado("🛒")
+st.write("")
 st.caption(
     "🟢 Conectado a Google — puedo escribir directo en tu hoja."
     if conectado else
