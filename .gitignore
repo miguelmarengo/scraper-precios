@@ -1,0 +1,21 @@
+# Entorno virtual e instalación local
+.venv/
+__pycache__/
+*.pyc
+
+# Credenciales de Google (nunca deben subirse al repositorio)
+credenciales.json
+*.credenciales.json
+credentials.json
+
+# Salidas y artefactos locales
+*.csv
+*.xlsx
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Editores
+.vscode/
+.idea/
